@@ -136,8 +136,10 @@ func (a *Agent) readStreamJSON(r interface{ Read([]byte) (int, error) }) {
 		// If the line isn't valid JSON, show it raw (e.g. sandbox/process errors).
 		text := extractDisplayText(line)
 		if text == "" {
+			// If it's valid JSON, it's an unhandled stream-json type — skip it.
+			// If it's not JSON, show it raw (sandbox/process errors).
 			trimmed := strings.TrimSpace(string(line))
-			if trimmed == "" {
+			if trimmed == "" || json.Valid(line) {
 				continue
 			}
 			text = trimmed + "\n"
