@@ -23,13 +23,13 @@ var (
 
 	sidebarStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("35")).
+			BorderForeground(lipgloss.Color("245")).
 			Padding(0, 1).
 			Width(30)
 
 	outputStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("35")).
+			BorderForeground(lipgloss.Color("245")).
 			Padding(0, 1)
 
 	statusBarStyle = lipgloss.NewStyle().
@@ -47,7 +47,7 @@ var (
 			Bold(true)
 
 	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
+			Foreground(lipgloss.Color("46")).
 			Bold(true)
 
 	helpStyle = lipgloss.NewStyle().
@@ -402,8 +402,8 @@ func (m MoeModel) View() string {
 		outputHeight = 5
 	}
 
-	sidebarBorder := lipgloss.Color("35")
-	outputBorder := lipgloss.Color("35")
+	sidebarBorder := lipgloss.Color("245")
+	outputBorder := lipgloss.Color("245")
 	if m.focus == moeFocusSidebar {
 		sidebarBorder = lipgloss.Color("46")
 	} else {
