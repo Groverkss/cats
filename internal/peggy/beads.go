@@ -152,8 +152,12 @@ func (s *BeadsStore) Create(ctx context.Context, opts CreateOpts) (string, error
 	if opts.Type != "" {
 		args = append(args, "--type="+opts.Type)
 	}
-	if opts.Parent != "" {
-		args = append(args, "--parent="+opts.Parent)
+	if opts.Topic != "" {
+		topic, err := s.GetTopic(ctx, opts.Topic)
+		if err != nil {
+			return "", fmt.Errorf("topic %q: %w", opts.Topic, err)
+		}
+		args = append(args, "--parent="+topic.EpicID)
 	}
 	if opts.Assignee != "" {
 		args = append(args, "--assignee="+opts.Assignee)

@@ -310,16 +310,20 @@ func cmdPeggyTicket(args []string) {
 	case "create":
 		fs := flag.NewFlagSet("ticket create", flag.ExitOnError)
 		title := fs.String("title", "", "Ticket title (required)")
-		parent := fs.String("parent", "", "Parent ticket ID (epic)")
+		topicName := fs.String("topic", "", "Topic name (required for task/bug/review)")
 		assignee := fs.String("assignee", "", "Assignee role")
 		priority := fs.Int("priority", 1, "Priority (0-4)")
-		typ := fs.String("type", "task", "Ticket type (task|bug|epic|review)")
+		typ := fs.String("type", "task", "Ticket type (task|bug|review)")
 		desc := fs.String("description", "", "Description")
 		dependsOn := fs.String("depends-on", "", "Comma-separated ticket IDs this depends on")
 		fs.Parse(args[1:])
 
 		if *title == "" {
 			fmt.Fprintf(os.Stderr, "Error: --title is required\n")
+			os.Exit(1)
+		}
+		if *topicName == "" {
+			fmt.Fprintf(os.Stderr, "Error: --topic is required\n")
 			os.Exit(1)
 		}
 
@@ -336,7 +340,7 @@ func cmdPeggyTicket(args []string) {
 		id, err := store.Create(ctx, peggy.CreateOpts{
 			Title:       *title,
 			Description: *desc,
-			Parent:      *parent,
+			Topic:       *topicName,
 			Assignee:    *assignee,
 			Priority:    *priority,
 			Type:        *typ,
@@ -504,8 +508,7 @@ func cmdPeggyTopic(args []string) {
 		fmt.Printf("Topic '%s' created:\n", topic.Name)
 		fmt.Printf("  Branch:   %s\n", topic.Branch)
 		fmt.Printf("  Worktree: %s\n", topic.Worktree)
-		fmt.Printf("  Epic:     %s\n", topic.EpicID)
-		fmt.Printf("\nNext: cats peggy ticket create --title='...' --parent=%s --assignee=coder\n", topic.EpicID)
+		fmt.Printf("\nNext: cats peggy ticket create --title='...' --topic=%s --assignee=coder\n", topic.Name)
 
 	case "list":
 		topics, err := store.ListTopics(ctx)
@@ -518,7 +521,7 @@ func cmdPeggyTopic(args []string) {
 		}
 		for _, t := range topics {
 			fmt.Printf("  %s (%s)\n", t.Name, t.Status)
-			fmt.Printf("    branch: %s | epic: %s | repo: %s\n", t.Branch, t.EpicID, t.Repo)
+			fmt.Printf("    branch: %s | repo: %s\n", t.Branch, t.Repo)
 		}
 
 	case "status":
@@ -736,7 +739,7 @@ const defaultPlannerPrompt = `You are Peggy, the planner for this project. You w
 - Read the codebase and assess what's needed
 - Create design docs when the work warrants it (in docs/design/)
 - Create topics: cats peggy topic create <name> --repo <path> "<description>"
-- Create tickets under topics: cats peggy ticket create --title="..." --type=task --parent=<epic_id> --assignee=coder
+- Create tickets under topics: cats peggy ticket create --title="..." --topic=<name> --type=task --assignee=coder
 - Track progress: cats peggy ticket list, cats peggy ticket show <id>, cats peggy ticket ready --role=coder
 
 ## What You Do NOT Do

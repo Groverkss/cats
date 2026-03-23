@@ -49,7 +49,7 @@ type Filter struct {
 type CreateOpts struct {
 	Title       string
 	Description string
-	Parent      string   // parent ticket ID (epic)
+	Topic       string   // topic name — peggy resolves to epic ID internally
 	Assignee    string
 	Priority    int      // 0-4
 	Type        string   // task, bug, epic, review

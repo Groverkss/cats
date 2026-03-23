@@ -21,6 +21,6 @@ BRANCH: {{BRANCH}}
 - Do not modify files outside the scope of the ticket
 - If you're blocked or unsure, update the ticket with your findings and reassign to planner:
   `cats peggy ticket update {{TICKET_ID}} --status=open --assignee=planner`
-- When done with all tasks in the topic's epic, create a review ticket:
-  - For code quality review: `cats peggy ticket create --title="Review: {{TOPIC_NAME}}" --type=review --assignee=reviewer --parent=<epic_id>`
-  - For design review: `cats peggy ticket create --title="Review: {{TOPIC_NAME}}" --type=review --assignee=human-review --parent=<epic_id>`
+- When done with all tasks in the topic, create a review ticket:
+  - For code quality review: `cats peggy ticket create --title="Review: {{TOPIC_NAME}}" --topic={{TOPIC_NAME}} --type=review --assignee=reviewer`
+  - For design review: `cats peggy ticket create --title="Review: {{TOPIC_NAME}}" --topic={{TOPIC_NAME}} --type=review --assignee=human-review`
