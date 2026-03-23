@@ -117,10 +117,11 @@ type PeggyModel struct {
 	focus peggyFocus
 
 	// Ticket list.
-	tickets   []peggy.Ticket
-	selected  int
-	filterIdx int // index into filterCycle
-	scrollOff int // scroll offset for list
+	tickets    []peggy.Ticket
+	blockedIDs map[string]bool // ticket IDs that are blocked by deps
+	selected   int
+	filterIdx  int // index into filterCycle
+	scrollOff  int // scroll offset for list
 
 	// Detail.
 	detail     *peggy.TicketDetail
@@ -144,8 +145,9 @@ func NewPeggy(store peggy.TicketStore, workspace string) PeggyModel {
 
 // Messages.
 type peggyTicketsMsg struct {
-	tickets []peggy.Ticket
-	topics  []peggy.Topic
+	tickets    []peggy.Ticket
+	blockedIDs map[string]bool
+	topics     []peggy.Topic
 }
 type peggyDetailMsg struct {
 	detail *peggy.TicketDetail
@@ -191,8 +193,15 @@ func (m PeggyModel) fetchTickets() tea.Cmd {
 			tickets, _ = m.store.List(ctx, filter)
 		}
 
+		// Always fetch blocked IDs so we can show correct icons.
+		blockedIDs := make(map[string]bool)
+		blocked, _ := m.store.Blocked(ctx)
+		for _, b := range blocked {
+			blockedIDs[b.ID] = true
+		}
+
 		topics, _ := m.store.ListTopics(ctx)
-		return peggyTicketsMsg{tickets: tickets, topics: topics}
+		return peggyTicketsMsg{tickets: tickets, blockedIDs: blockedIDs, topics: topics}
 	}
 }
 
@@ -216,6 +225,7 @@ func (m PeggyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case peggyTicketsMsg:
 		m.tickets = msg.tickets
+		m.blockedIDs = msg.blockedIDs
 		m.topics = msg.topics
 		// Clamp selection.
 		if m.selected >= len(m.tickets) {
@@ -482,6 +492,9 @@ func (m PeggyModel) renderTicketList() string {
 		}
 
 		icon := statusIcon(t.Status)
+		if m.blockedIDs[t.ID] {
+			icon = statusIcon(peggy.StatusBlocked)
+		}
 		prio := priorityStr(t.Priority)
 		typ := styledType(t.Type)
 
@@ -526,7 +539,11 @@ func (m PeggyModel) renderInfoView() string {
 	b.WriteString(topicNameStyle.Render(d.Title) + "\n")
 	b.WriteString(dimStyle.Render(strings.Repeat("-", min(len(d.Title), 40))) + "\n")
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("ID:"), d.ID))
-	b.WriteString(fmt.Sprintf("%s %s %s\n", labelStyle.Render("Status:"), statusIcon(d.Status), styledStatus(d.Status)))
+	displayStatus := d.Status
+	if m.blockedIDs[d.ID] {
+		displayStatus = peggy.StatusBlocked
+	}
+	b.WriteString(fmt.Sprintf("%s %s %s\n", labelStyle.Render("Status:"), statusIcon(displayStatus), styledStatus(displayStatus)))
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Priority:"), priorityStr(d.Priority)))
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Type:"), styledType(d.Type)))
 
