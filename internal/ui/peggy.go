@@ -137,12 +137,21 @@ func peggyRefreshCmd() tea.Cmd {
 func (m PeggyModel) fetchTickets() tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		var filter peggy.Filter
-		if m.filterIdx > 0 && m.filterIdx < len(filterCycle) {
-			s := filterCycle[m.filterIdx]
-			filter.Status = &s
+		var tickets []peggy.Ticket
+
+		if m.filterIdx > 0 && m.filterIdx < len(filterCycle) && filterCycle[m.filterIdx] == peggy.StatusBlocked {
+			// "blocked" uses the dedicated Blocked() query since br tracks
+			// blocked state separately from the status field.
+			tickets, _ = m.store.Blocked(ctx)
+		} else {
+			var filter peggy.Filter
+			if m.filterIdx > 0 && m.filterIdx < len(filterCycle) {
+				s := filterCycle[m.filterIdx]
+				filter.Status = &s
+			}
+			tickets, _ = m.store.List(ctx, filter)
 		}
-		tickets, _ := m.store.List(ctx, filter)
+
 		topics, _ := m.store.ListTopics(ctx)
 		return peggyTicketsMsg{tickets: tickets, topics: topics}
 	}

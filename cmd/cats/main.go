@@ -260,7 +260,7 @@ func cmdPeggyTUI() {
 
 func cmdPeggyTicket(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: cats peggy ticket <list|show|create|ready|close|update>\n")
+		fmt.Fprintf(os.Stderr, "Usage: cats peggy ticket <list|show|create|ready|close|update|dep|blocked>\n")
 		os.Exit(1)
 	}
 
@@ -315,11 +315,22 @@ func cmdPeggyTicket(args []string) {
 		priority := fs.Int("priority", 1, "Priority (0-4)")
 		typ := fs.String("type", "task", "Ticket type (task|bug|epic|review)")
 		desc := fs.String("description", "", "Description")
+		dependsOn := fs.String("depends-on", "", "Comma-separated ticket IDs this depends on")
 		fs.Parse(args[1:])
 
 		if *title == "" {
 			fmt.Fprintf(os.Stderr, "Error: --title is required\n")
 			os.Exit(1)
+		}
+
+		var deps []string
+		if *dependsOn != "" {
+			for _, d := range strings.Split(*dependsOn, ",") {
+				d = strings.TrimSpace(d)
+				if d != "" {
+					deps = append(deps, d)
+				}
+			}
 		}
 
 		id, err := store.Create(ctx, peggy.CreateOpts{
@@ -329,6 +340,7 @@ func cmdPeggyTicket(args []string) {
 			Assignee:    *assignee,
 			Priority:    *priority,
 			Type:        *typ,
+			DependsOn:   deps,
 		})
 		if err != nil {
 			fatal(err)
@@ -386,6 +398,65 @@ func cmdPeggyTicket(args []string) {
 			fatal(err)
 		}
 		fmt.Printf("Updated %s -> %s\n", ticketID, *status)
+
+	case "dep":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "Usage: cats peggy ticket dep <add|remove|list> <ticket-id> [depends-on-id]\n")
+			os.Exit(1)
+		}
+		switch args[1] {
+		case "add":
+			if len(args) < 4 {
+				fmt.Fprintf(os.Stderr, "Usage: cats peggy ticket dep add <ticket-id> <depends-on-id>\n")
+				os.Exit(1)
+			}
+			if err := store.AddDep(ctx, args[2], args[3]); err != nil {
+				fatal(err)
+			}
+			fmt.Printf("%s now depends on %s\n", args[2], args[3])
+
+		case "remove":
+			if len(args) < 4 {
+				fmt.Fprintf(os.Stderr, "Usage: cats peggy ticket dep remove <ticket-id> <depends-on-id>\n")
+				os.Exit(1)
+			}
+			if err := store.RemoveDep(ctx, args[2], args[3]); err != nil {
+				fatal(err)
+			}
+			fmt.Printf("Removed dependency: %s no longer depends on %s\n", args[2], args[3])
+
+		case "list":
+			if len(args) < 3 {
+				fmt.Fprintf(os.Stderr, "Usage: cats peggy ticket dep list <ticket-id>\n")
+				os.Exit(1)
+			}
+			deps, err := store.ListDeps(ctx, args[2])
+			if err != nil {
+				fatal(err)
+			}
+			if len(deps) == 0 {
+				fmt.Println("No dependencies.")
+			} else {
+				for _, d := range deps {
+					fmt.Println(" ", d)
+				}
+			}
+
+		default:
+			fmt.Fprintf(os.Stderr, "Usage: cats peggy ticket dep <add|remove|list>\n")
+			os.Exit(1)
+		}
+
+	case "blocked":
+		fs := flag.NewFlagSet("ticket blocked", flag.ExitOnError)
+		format := fs.String("format", "text", "Output format (text|json)")
+		fs.Parse(args[1:])
+
+		tickets, err := store.Blocked(ctx)
+		if err != nil {
+			fatal(err)
+		}
+		printTickets(tickets, *format)
 
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown ticket command: %s\n", args[0])

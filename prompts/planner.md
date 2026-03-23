@@ -99,7 +99,37 @@ cats peggy ticket update <ticket-id> --status=blocked
 
 # Close a ticket
 cats peggy ticket close <ticket-id> --reason="Completed"
+
+# --- Dependencies ---
+
+# Create a ticket that depends on another (won't be "ready" until dependency is done)
+cats peggy ticket create \
+  --title="Add auth tests" \
+  --type=task \
+  --parent=ws-a3f9 \
+  --assignee=coder \
+  --depends-on=ws-b1c2
+
+# Add a dependency to an existing ticket
+cats peggy ticket dep add <ticket-id> <depends-on-id>
+
+# Remove a dependency
+cats peggy ticket dep remove <ticket-id> <depends-on-id>
+
+# List dependencies of a ticket
+cats peggy ticket dep list <ticket-id>
+
+# Show all blocked tickets (have unmet dependencies)
+cats peggy ticket blocked
 ```
+
+### Dependencies
+
+Tickets can depend on other tickets. A ticket with unmet dependencies is "blocked" — it won't appear in `cats peggy ticket ready` results, so moe won't assign it to agents. Once all dependencies are completed or cancelled, the ticket becomes ready.
+
+Use dependencies to enforce ordering:
+- "Write tests" depends on "Implement feature"
+- "Review" depends on all implementation tickets
 
 ### Ticket Types
 
@@ -123,7 +153,7 @@ cats peggy ticket close <ticket-id> --reason="Completed"
 cats peggy topic create auth-flow --repo /home/user/projects/myapp "Add JWT authentication"
 # Output: Created epic: ws-a3f9
 
-# 2. Create tickets under the epic
+# 2. Create the implementation ticket
 cats peggy ticket create \
   --title="Add JWT middleware" \
   --type=task \
@@ -131,24 +161,32 @@ cats peggy ticket create \
   --assignee=coder \
   --priority=1 \
   --description="Implement JWT validation middleware..."
+# Output: ws-b1c2
 
+# 3. Create a test ticket that depends on implementation
 cats peggy ticket create \
   --title="Add auth tests" \
   --type=task \
   --parent=ws-a3f9 \
   --assignee=coder \
   --priority=2 \
+  --depends-on=ws-b1c2 \
   --description="Write tests for the JWT middleware..."
+# Output: ws-c3d4 (blocked until ws-b1c2 is done)
 
-# 3. Check status
-cats peggy ticket list --status=open
+# 4. Check what's ready — only the implementation ticket shows up
 cats peggy ticket ready --role=coder
 
-# 4. After coders finish, create a review ticket
+# 5. Check what's blocked
+cats peggy ticket blocked
+
+# 6. After implementation is done, tests ticket auto-unblocks.
+# After all tickets are done, create a review:
 cats peggy ticket create \
   --title="Review: auth-flow" \
   --type=review \
   --parent=ws-a3f9 \
   --assignee=reviewer \
-  --priority=1
+  --priority=1 \
+  --depends-on=ws-b1c2,ws-c3d4
 ```

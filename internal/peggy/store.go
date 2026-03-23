@@ -49,10 +49,11 @@ type Filter struct {
 type CreateOpts struct {
 	Title       string
 	Description string
-	Parent      string // parent ticket ID (epic)
+	Parent      string   // parent ticket ID (epic)
 	Assignee    string
-	Priority    int    // 0-4
-	Type        string // task, bug, epic, review
+	Priority    int      // 0-4
+	Type        string   // task, bug, epic, review
+	DependsOn   []string // ticket IDs this ticket depends on
 }
 
 type TopicOpts struct {
@@ -72,6 +73,12 @@ type TicketStore interface {
 	Create(ctx context.Context, opts CreateOpts) (string, error)
 	UpdateStatus(ctx context.Context, id string, status Status, actor string) error
 	Close(ctx context.Context, id string, reason string) error
+
+	// Dependencies
+	AddDep(ctx context.Context, id string, dependsOn string) error
+	RemoveDep(ctx context.Context, id string, dependsOn string) error
+	ListDeps(ctx context.Context, id string) ([]string, error)
+	Blocked(ctx context.Context) ([]Ticket, error)
 
 	// Topics
 	ListTopics(ctx context.Context) ([]Topic, error)

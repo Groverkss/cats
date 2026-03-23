@@ -169,7 +169,16 @@ func (s *BeadsStore) Create(ctx context.Context, opts CreateOpts) (string, error
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	id := strings.TrimSpace(string(out))
+
+	// Add dependencies if specified.
+	for _, dep := range opts.DependsOn {
+		if err := s.AddDep(ctx, id, dep); err != nil {
+			return id, fmt.Errorf("created %s but failed to add dep on %s: %w", id, dep, err)
+		}
+	}
+
+	return id, nil
 }
 
 func (s *BeadsStore) UpdateStatus(ctx context.Context, id string, status Status, actor string) error {
@@ -188,6 +197,46 @@ func (s *BeadsStore) Close(ctx context.Context, id string, reason string) error 
 	}
 	_, err := s.br(ctx, args...)
 	return err
+}
+
+// --- Dependencies ---
+
+func (s *BeadsStore) AddDep(ctx context.Context, id string, dependsOn string) error {
+	_, err := s.br(ctx, "dep", "add", id, dependsOn)
+	return err
+}
+
+func (s *BeadsStore) RemoveDep(ctx context.Context, id string, dependsOn string) error {
+	_, err := s.br(ctx, "dep", "remove", id, dependsOn)
+	return err
+}
+
+func (s *BeadsStore) ListDeps(ctx context.Context, id string) ([]string, error) {
+	// br dep list returns dependency info as JSON.
+	type brDep struct {
+		DependsOn string `json:"depends_on"`
+	}
+	var deps []brDep
+	if err := s.brJSON(ctx, &deps, "dep", "list", id); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(deps))
+	for i, d := range deps {
+		ids[i] = d.DependsOn
+	}
+	return ids, nil
+}
+
+func (s *BeadsStore) Blocked(ctx context.Context) ([]Ticket, error) {
+	var raw []brTicket
+	if err := s.brJSON(ctx, &raw, "blocked"); err != nil {
+		return nil, err
+	}
+	tickets := make([]Ticket, len(raw))
+	for i, t := range raw {
+		tickets[i] = toBrTicket(t)
+	}
+	return tickets, nil
 }
 
 // --- Topics ---
