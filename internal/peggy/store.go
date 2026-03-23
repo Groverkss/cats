@@ -8,8 +8,7 @@ const (
 	StatusOpen       Status = "open"
 	StatusInProgress Status = "in_progress"
 	StatusBlocked    Status = "blocked"
-	StatusCompleted  Status = "completed"
-	StatusCancelled  Status = "cancelled"
+	StatusClosed     Status = "closed"
 )
 
 type Ticket struct {

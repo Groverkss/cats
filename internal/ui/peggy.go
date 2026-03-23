@@ -93,7 +93,7 @@ var filterCycle = []peggy.Status{
 	peggy.StatusOpen,
 	peggy.StatusInProgress,
 	peggy.StatusBlocked, // blocked (has unmet deps)
-	peggy.StatusCompleted,
+	peggy.StatusClosed,
 }
 
 type PeggyModel struct {
@@ -348,7 +348,7 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusOpts = []peggy.Status{
 				peggy.StatusOpen,
 				peggy.StatusInProgress,
-				peggy.StatusCompleted,
+				peggy.StatusClosed,
 			}
 			m.statusSelected = 0
 		}
@@ -382,7 +382,7 @@ func (m PeggyModel) handleStatusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			t := m.tickets[m.selected]
 			newStatus := m.statusOpts[m.statusSelected]
 			ctx := context.Background()
-			if newStatus == peggy.StatusCompleted {
+			if newStatus == peggy.StatusClosed {
 				m.store.Close(ctx, t.ID, "Completed via TUI")
 			} else {
 				m.store.UpdateStatus(ctx, t.ID, newStatus, "user")
@@ -430,7 +430,7 @@ func (m PeggyModel) View() string {
 		switch f {
 		case filterReady:
 			filterLabel = "ready"
-		case peggy.StatusCompleted:
+		case peggy.StatusClosed:
 			filterLabel = "closed"
 		default:
 			filterLabel = string(f)
@@ -710,7 +710,7 @@ func (m PeggyModel) renderStatusOverlay() string {
 			prefix = selectedStyle.Render("| ")
 		}
 		label := string(s)
-		if s == peggy.StatusCompleted {
+		if s == peggy.StatusClosed {
 			label = "closed"
 		}
 		b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, statusIcon(s), label))
@@ -740,10 +740,8 @@ func statusIcon(s peggy.Status) string {
 		return activeStyle.Render("*")
 	case peggy.StatusBlocked:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Render("!")
-	case peggy.StatusCompleted:
+	case peggy.StatusClosed:
 		return dimStyle.Render("v")
-	case peggy.StatusCancelled:
-		return dimStyle.Render("x")
 	default:
 		return "?"
 	}
@@ -800,7 +798,7 @@ func styledStatus(s peggy.Status) string {
 		return activeStyle.Render(string(s))
 	case peggy.StatusBlocked:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Render(string(s))
-	case peggy.StatusCompleted:
+	case peggy.StatusClosed:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("closed")
 	default:
 		return string(s)
