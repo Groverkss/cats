@@ -118,16 +118,16 @@ BWRAP_ARGS=(
 [[ -f "$HOME_DIR/.gitconfig" ]] && BWRAP_ARGS+=(--ro-bind "$HOME_DIR/.gitconfig" "$HOME_DIR/.gitconfig")
 [[ -d "$WORKSPACE/.venv" ]] && BWRAP_ARGS+=(--setenv VIRTUAL_ENV "$WORKSPACE/.venv")
 
-# Bind workdir if it's outside the workspace (e.g. /tmp worktrees).
-if [[ "$WORKDIR" != "$WORKSPACE"* ]]; then
-    BWRAP_ARGS+=(--bind "$WORKDIR" "$WORKDIR")
-fi
-
 # Tmp: workspace-local if exists, else tmpfs.
 if [[ -d "$WORKSPACE/.tmp" ]]; then
     BWRAP_ARGS+=(--bind "$WORKSPACE/.tmp" /tmp)
 else
     BWRAP_ARGS+=(--tmpfs /tmp)
+fi
+
+# Bind workdir if it's outside the workspace (AFTER /tmp mount so it overlays).
+if [[ "$WORKDIR" != "$WORKSPACE"* ]]; then
+    BWRAP_ARGS+=(--bind "$WORKDIR" "$WORKDIR")
 fi
 
 # Pass through BR_ACTOR if set.
