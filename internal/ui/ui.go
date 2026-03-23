@@ -59,6 +59,15 @@ const (
 	modeNormal mode = iota
 	modeSpawnRole
 	modeStaleRecovery
+	modeTickets
+)
+
+// Which panel the output area shows.
+type outputView int
+
+const (
+	viewAgentOutput outputView = iota
+	viewTickets
 )
 
 type Model struct {
@@ -69,10 +78,16 @@ type Model struct {
 	width     int
 	height    int
 
-	// Ticket stats (updated on tick).
-	readyCoder    int
-	readyReviewer int
-	inProgress    int
+	// Output panel view.
+	outputView outputView
+
+	// Ticket data (updated on tick).
+	readyCoder      int
+	readyReviewer   int
+	inProgress      int
+	coderTickets    []tickets.Ticket
+	reviewerTickets []tickets.Ticket
+	progressTickets []tickets.Ticket
 
 	// Spawn role selection.
 	spawnRoles    []string
@@ -94,9 +109,12 @@ func New(p *pool.Pool, workspace string) Model {
 // Messages.
 type tickMsg struct{}
 type pollMsg struct {
-	readyCoder    int
-	readyReviewer int
-	inProgress    int
+	readyCoder      int
+	readyReviewer   int
+	inProgress      int
+	coderTickets    []tickets.Ticket
+	reviewerTickets []tickets.Ticket
+	progressTickets []tickets.Ticket
 }
 type assignMsg struct{}
 type staleMsg struct {
@@ -125,12 +143,15 @@ func tickCmd() tea.Cmd {
 func (m Model) pollTickets() tea.Msg {
 	coderTickets, _ := tickets.Ready("coder")
 	reviewerTickets, _ := tickets.Ready("reviewer")
-	inProgress, _ := tickets.ListByStatus("in_progress")
+	progressTickets, _ := tickets.ListByStatus("in_progress")
 
 	return pollMsg{
-		readyCoder:    len(coderTickets),
-		readyReviewer: len(reviewerTickets),
-		inProgress:    len(inProgress),
+		readyCoder:      len(coderTickets),
+		readyReviewer:   len(reviewerTickets),
+		inProgress:      len(progressTickets),
+		coderTickets:    coderTickets,
+		reviewerTickets: reviewerTickets,
+		progressTickets: progressTickets,
 	}
 }
 
@@ -190,6 +211,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.readyCoder = msg.readyCoder
 		m.readyReviewer = msg.readyReviewer
 		m.inProgress = msg.inProgress
+		m.coderTickets = msg.coderTickets
+		m.reviewerTickets = msg.reviewerTickets
+		m.progressTickets = msg.progressTickets
 		return m, nil
 
 	case assignMsg:
@@ -235,6 +259,14 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.selected >= len(m.pool.Agents()) && m.selected > 0 {
 				m.selected--
 			}
+		}
+		return m, nil
+
+	case "t":
+		if m.outputView == viewTickets {
+			m.outputView = viewAgentOutput
+		} else {
+			m.outputView = viewTickets
 		}
 		return m, nil
 
@@ -347,7 +379,12 @@ func (m Model) View() string {
 
 	agents := m.pool.Agents()
 	sidebar := m.renderSidebar(agents)
-	output := m.renderOutput(agents)
+	var output string
+	if m.outputView == viewTickets {
+		output = m.renderTicketList()
+	} else {
+		output = m.renderOutput(agents)
+	}
 	statusBar := m.renderStatusBar()
 	help := m.renderHelp()
 
@@ -388,6 +425,66 @@ func (m Model) renderStaleRecovery() string {
 			assignee = *t.Assignee
 		}
 		b.WriteString(fmt.Sprintf("%s%s  %s  [%s]\n", prefix, t.ID, t.Title, assignee))
+	}
+
+	return b.String()
+}
+
+func (m Model) renderTicketList() string {
+	var b strings.Builder
+
+	priorityStr := func(p int) string {
+		switch p {
+		case 0:
+			return "P0"
+		case 1:
+			return "P1"
+		case 2:
+			return "P2"
+		case 3:
+			return "P3"
+		case 4:
+			return "P4"
+		default:
+			return fmt.Sprintf("P%d", p)
+		}
+	}
+
+	renderTicket := func(t tickets.Ticket) {
+		assignee := ""
+		if t.Assignee != nil {
+			assignee = *t.Assignee
+		}
+		b.WriteString(fmt.Sprintf("  %-14s %-4s %-10s %s\n", t.ID, priorityStr(t.Priority), assignee, t.Title))
+	}
+
+	b.WriteString("Tickets\n")
+	b.WriteString(fmt.Sprintf("  %-14s %-4s %-10s %s\n", "ID", "PRI", "ASSIGNEE", "TITLE"))
+	b.WriteString("  " + strings.Repeat("─", 60) + "\n")
+
+	if len(m.coderTickets) > 0 {
+		b.WriteString(activeStyle.Render(fmt.Sprintf("\n  Ready — coder (%d)\n", len(m.coderTickets))))
+		for _, t := range m.coderTickets {
+			renderTicket(t)
+		}
+	}
+
+	if len(m.reviewerTickets) > 0 {
+		b.WriteString(activeStyle.Render(fmt.Sprintf("\n  Ready — reviewer (%d)\n", len(m.reviewerTickets))))
+		for _, t := range m.reviewerTickets {
+			renderTicket(t)
+		}
+	}
+
+	if len(m.progressTickets) > 0 {
+		b.WriteString(failedStyle.Render(fmt.Sprintf("\n  In Progress (%d)\n", len(m.progressTickets))))
+		for _, t := range m.progressTickets {
+			renderTicket(t)
+		}
+	}
+
+	if len(m.coderTickets) == 0 && len(m.reviewerTickets) == 0 && len(m.progressTickets) == 0 {
+		b.WriteString(idleStyle.Render("\n  No tickets found.\n"))
 	}
 
 	return b.String()
@@ -515,5 +612,8 @@ func (m Model) renderHelp() string {
 	if m.mode == modeSpawnRole {
 		return helpStyle.Render(" [enter] select  [esc] cancel")
 	}
-	return helpStyle.Render(" [l]aunch  [k]ill  [j/↓] next  [↑] prev  [q]uit")
+	if m.outputView == viewTickets {
+		return helpStyle.Render(" [t]oggle output  [l]aunch  [k]ill  [j/↓] next  [↑] prev  [q]uit")
+	}
+	return helpStyle.Render(" [t]ickets  [l]aunch  [k]ill  [j/↓] next  [↑] prev  [q]uit")
 }
