@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/creack/pty"
 )
 
 type State int
@@ -43,12 +41,11 @@ type Agent struct {
 
 	// Process management.
 	cmd    *exec.Cmd
-	ptmx   *os.File
 	cancel func()
 
 	// Output capture.
-	mu     sync.Mutex
-	output []byte
+	mu      sync.Mutex
+	output  []byte
 	logFile *os.File
 }
 
@@ -96,34 +93,43 @@ func (a *Agent) Start(workspace, ticketID, topic, branch, worktree, promptTempla
 		fmt.Sprintf("CATS_WORKSPACE=%s", workspace),
 	)
 
-	// Start with a PTY for output capture.
-	ptmx, err := pty.Start(a.cmd)
+	// Capture stdout and stderr via pipes (not PTY — avoids conflict with bubbletea).
+	stdout, err := a.cmd.StdoutPipe()
 	if err != nil {
+		a.State = Failed
+		return fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+	stderr, err := a.cmd.StderrPipe()
+	if err != nil {
+		a.State = Failed
+		return fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := a.cmd.Start(); err != nil {
 		a.State = Failed
 		return fmt.Errorf("failed to start agent: %w", err)
 	}
-	a.ptmx = ptmx
 
 	// Open log file.
 	logPath := fmt.Sprintf("%s/%s-%s.log", logDir, a.ID, time.Now().Format("2006-01-02T15-04-05"))
 	a.logFile, err = os.Create(logPath)
 	if err != nil {
-		a.ptmx.Close()
 		a.cmd.Process.Kill()
 		a.State = Failed
 		return fmt.Errorf("failed to create log file: %w", err)
 	}
 
-	// Read PTY output in background.
-	go a.readOutput()
+	// Read stdout and stderr in background.
+	go a.readPipe(stdout)
+	go a.readPipe(stderr)
 
 	return nil
 }
 
-func (a *Agent) readOutput() {
+func (a *Agent) readPipe(r io.ReadCloser) {
 	buf := make([]byte, 4096)
 	for {
-		n, err := a.ptmx.Read(buf)
+		n, err := r.Read(buf)
 		if n > 0 {
 			a.mu.Lock()
 			a.output = append(a.output, buf[:n]...)
@@ -137,9 +143,6 @@ func (a *Agent) readOutput() {
 			a.mu.Unlock()
 		}
 		if err != nil {
-			if err != io.EOF {
-				// PTY closed, agent exited.
-			}
 			return
 		}
 	}
@@ -153,9 +156,6 @@ func (a *Agent) Wait() error {
 	err := a.cmd.Wait()
 
 	a.mu.Lock()
-	if a.ptmx != nil {
-		a.ptmx.Close()
-	}
 	if a.logFile != nil {
 		a.logFile.Close()
 		a.logFile = nil
@@ -191,5 +191,4 @@ func (a *Agent) Reset() {
 	a.Branch = ""
 	a.output = nil
 	a.cmd = nil
-	a.ptmx = nil
 }
