@@ -94,7 +94,6 @@ var filterCycle = []peggy.Status{
 	peggy.StatusInProgress,
 	peggy.StatusBlocked, // blocked (has unmet deps)
 	peggy.StatusCompleted,
-	peggy.StatusCancelled,
 }
 
 type PeggyModel struct {
@@ -349,9 +348,7 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusOpts = []peggy.Status{
 				peggy.StatusOpen,
 				peggy.StatusInProgress,
-				peggy.StatusBlocked,
 				peggy.StatusCompleted,
-				peggy.StatusCancelled,
 			}
 			m.statusSelected = 0
 		}
