@@ -12,3 +12,6 @@ logs/*.log
 
 # Beads database (JSONL is tracked, DB is local)
 .beads/beads.db
+
+# Research documents (sensitive)
+research/
