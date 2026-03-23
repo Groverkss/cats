@@ -544,8 +544,21 @@ func cmdPlan(args []string) {
 		fatal(err)
 	}
 
-	// exec replaces this process with claude.
-	err = execClaude(claudePath, "--append-system-prompt", prompt)
+	// Planner can read code and manage tickets/topics, but cannot write code.
+	claudeArgs := []string{
+		"--append-system-prompt", prompt,
+		"--allowedTools",
+		"Read",
+		"Glob",
+		"Grep",
+		"Bash(cats peggy *)",
+		"Bash(git log *)",
+		"Bash(git diff *)",
+		"Bash(git show *)",
+		"Bash(ls *)",
+	}
+
+	err = execClaude(claudePath, claudeArgs...)
 	if err != nil {
 		fatal(err)
 	}
