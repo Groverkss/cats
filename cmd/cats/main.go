@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -100,6 +101,11 @@ func runKitten(cmd *cobra.Command, args []string) error {
 	dir, err := os.Getwd()
 	if err != nil {
 		return err
+	}
+
+	// Require current directory to be inside a git repo.
+	if _, err := exec.Command("git", "-C", dir, "rev-parse", "--git-dir").Output(); err != nil {
+		return fmt.Errorf("current directory is not a git repository\nRun 'git init' first or cd into an existing repo")
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "cats.toml")); err == nil {
