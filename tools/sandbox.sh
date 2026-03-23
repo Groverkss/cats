@@ -28,7 +28,6 @@ WORKDIR="$WORKSPACE"
 if [[ "${1:-}" == "--workdir" ]]; then
     shift
     WORKDIR="${1:?--workdir requires a path}"
-    # Resolve relative to workspace.
     if [[ ! "$WORKDIR" = /* ]]; then
         WORKDIR="$WORKSPACE/$WORKDIR"
     fi
@@ -55,41 +54,24 @@ BWRAP_ARGS=(
     --ro-bind /sbin /sbin
     --ro-bind /etc /etc
 
-    # lib64 if it exists (Fedora/RHEL).
-    $(test -d /lib64 && echo "--ro-bind /lib64 /lib64" || true)
-
-    # systemd-resolved socket (DNS).
-    $(test -d /run/systemd/resolve && echo "--ro-bind /run/systemd/resolve /run/systemd/resolve" || true)
-
     # Proc and dev.
     --proc /proc
     --dev /dev
     --dev-bind /dev/pts /dev/pts
     --dev-bind /dev/ptmx /dev/ptmx
 
-    # Tmp: workspace-local if exists, else tmpfs.
-    $(test -d "$WORKSPACE/.tmp" && echo "--bind $WORKSPACE/.tmp /tmp" || echo "--tmpfs /tmp")
-
-    # The workspace: full read-write.
-    --bind "$WORKSPACE" "$WORKSPACE"
-
-    # Home directory: minimal tmpfs base.
+    # Home directory: minimal tmpfs base (must come before sub-mounts).
     --tmpfs "$HOME_DIR"
+
+    # The workspace: full read-write (on top of tmpfs home).
+    --bind "$WORKSPACE" "$WORKSPACE"
 
     # Claude Code config and cache (persisted).
     --bind "$HOME_DIR/.claude" "$HOME_DIR/.claude"
-    $(test -f "$HOME_DIR/.claude.json" && echo "--bind $HOME_DIR/.claude.json $HOME_DIR/.claude.json" || true)
     --bind "$HOME_DIR/.cache" "$HOME_DIR/.cache"
 
     # Local binaries (claude CLI, pip tools).
     --ro-bind "$HOME_DIR/.local" "$HOME_DIR/.local"
-
-    # Node.js / nvm if present.
-    $(test -d "$HOME_DIR/.nvm" && echo "--ro-bind $HOME_DIR/.nvm $HOME_DIR/.nvm" || true)
-    $(test -d "$HOME_DIR/.npm" && echo "--bind $HOME_DIR/.npm $HOME_DIR/.npm" || true)
-
-    # Git config (read-only).
-    $(test -f "$HOME_DIR/.gitconfig" && echo "--ro-bind $HOME_DIR/.gitconfig $HOME_DIR/.gitconfig" || true)
 
     # Block credentials.
     --tmpfs "$HOME_DIR/.ssh"
@@ -106,16 +88,13 @@ BWRAP_ARGS=(
     --setenv TERM "${TERM:-xterm-256color}"
     --setenv LANG "${LANG:-en_US.UTF-8}"
     --setenv SHELL /bin/bash
-    --setenv COLUMNS "${COLUMNS:-$(tput cols 2>/dev/null || echo 120)}"
-    --setenv LINES "${LINES:-$(tput lines 2>/dev/null || echo 40)}"
+    --setenv COLUMNS "${COLUMNS:-120}"
+    --setenv LINES "${LINES:-40}"
     --setenv XDG_CACHE_HOME "$HOME_DIR/.cache"
     --setenv XDG_CONFIG_HOME "$HOME_DIR/.config"
 
-    # PATH: venv first, local bins, node, system.
+    # PATH.
     --setenv PATH "$WORKSPACE/.venv/bin:$HOME_DIR/.local/bin:${NVM_NODE_BIN:+$NVM_NODE_BIN:}/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-
-    # Python venv.
-    $(test -d "$WORKSPACE/.venv" && echo "--setenv VIRTUAL_ENV $WORKSPACE/.venv" || true)
 
     # Temp directory.
     --setenv TMPDIR "/tmp"
@@ -127,19 +106,29 @@ BWRAP_ARGS=(
     --setenv CATS_SANDBOX 1
 )
 
-# Pass through BR_ACTOR if set.
-if [[ -n "${BR_ACTOR:-}" ]]; then
-    BWRAP_ARGS+=(--setenv BR_ACTOR "$BR_ACTOR")
+# --- Conditional mounts ---
+[[ -d /lib64 ]] && BWRAP_ARGS+=(--ro-bind /lib64 /lib64)
+[[ -d /run/systemd/resolve ]] && BWRAP_ARGS+=(--ro-bind /run/systemd/resolve /run/systemd/resolve)
+[[ -f "$HOME_DIR/.claude.json" ]] && BWRAP_ARGS+=(--bind "$HOME_DIR/.claude.json" "$HOME_DIR/.claude.json")
+[[ -d "$HOME_DIR/.nvm" ]] && BWRAP_ARGS+=(--ro-bind "$HOME_DIR/.nvm" "$HOME_DIR/.nvm")
+[[ -d "$HOME_DIR/.npm" ]] && BWRAP_ARGS+=(--bind "$HOME_DIR/.npm" "$HOME_DIR/.npm")
+[[ -f "$HOME_DIR/.gitconfig" ]] && BWRAP_ARGS+=(--ro-bind "$HOME_DIR/.gitconfig" "$HOME_DIR/.gitconfig")
+[[ -d "$WORKSPACE/.venv" ]] && BWRAP_ARGS+=(--setenv VIRTUAL_ENV "$WORKSPACE/.venv")
+
+# Tmp: workspace-local if exists, else tmpfs.
+if [[ -d "$WORKSPACE/.tmp" ]]; then
+    BWRAP_ARGS+=(--bind "$WORKSPACE/.tmp" /tmp)
+else
+    BWRAP_ARGS+=(--tmpfs /tmp)
 fi
+
+# Pass through BR_ACTOR if set.
+[[ -n "${BR_ACTOR:-}" ]] && BWRAP_ARGS+=(--setenv BR_ACTOR "$BR_ACTOR")
 
 # --- GPU passthrough ---
 if [[ "$GPU" == "1" ]]; then
-    if [[ -e /dev/kfd ]]; then
-        BWRAP_ARGS+=(--dev-bind /dev/kfd /dev/kfd)
-    fi
-    if [[ -d /dev/dri ]]; then
-        BWRAP_ARGS+=(--dev-bind /dev/dri /dev/dri)
-    fi
+    [[ -e /dev/kfd ]] && BWRAP_ARGS+=(--dev-bind /dev/kfd /dev/kfd)
+    [[ -d /dev/dri ]] && BWRAP_ARGS+=(--dev-bind /dev/dri /dev/dri)
     if [[ -d /opt/rocm ]]; then
         BWRAP_ARGS+=(--ro-bind /opt/rocm /opt/rocm)
         BWRAP_ARGS+=(--setenv ROCM_PATH /opt/rocm)
@@ -147,9 +136,7 @@ if [[ "$GPU" == "1" ]]; then
 fi
 
 # --- Network ---
-if [[ "$ALLOW_NET" == "0" ]]; then
-    BWRAP_ARGS+=(--unshare-net)
-fi
+[[ "$ALLOW_NET" == "0" ]] && BWRAP_ARGS+=(--unshare-net)
 
 # --- Extra mounts ---
 if [[ -n "${CATS_EXTRA_RO:-}" ]]; then

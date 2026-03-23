@@ -58,6 +58,7 @@ type mode int
 const (
 	modeNormal mode = iota
 	modeSpawnRole
+	modeStaleRecovery
 )
 
 type Model struct {
@@ -76,6 +77,10 @@ type Model struct {
 	// Spawn role selection.
 	spawnRoles    []string
 	spawnSelected int
+
+	// Stale ticket recovery.
+	staleTickets  []tickets.Ticket
+	staleSelected int
 }
 
 func New(p *pool.Pool, workspace string) Model {
@@ -94,11 +99,20 @@ type pollMsg struct {
 	inProgress    int
 }
 type assignMsg struct{}
+type staleMsg struct {
+	tickets []tickets.Ticket
+}
 
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(),
+		checkStaleCmd,
 	)
+}
+
+func checkStaleCmd() tea.Msg {
+	stale, _ := tickets.StaleTickets()
+	return staleMsg{tickets: stale}
 }
 
 func tickCmd() tea.Cmd {
@@ -180,6 +194,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case assignMsg:
 		return m, nil
+
+	case staleMsg:
+		if len(msg.tickets) > 0 {
+			m.staleTickets = msg.tickets
+			m.staleSelected = 0
+			m.mode = modeStaleRecovery
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -188,6 +210,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeSpawnRole:
 		return m.handleSpawnKey(msg)
+	case modeStaleRecovery:
+		return m.handleStaleKey(msg)
 	default:
 		return m.handleNormalKey(msg)
 	}
@@ -258,12 +282,68 @@ func (m Model) handleSpawnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) handleStaleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "escape", "s":
+		// Skip — leave all as-is.
+		m.mode = modeNormal
+		m.staleTickets = nil
+		return m, nil
+
+	case "j", "down":
+		if m.staleSelected < len(m.staleTickets)-1 {
+			m.staleSelected++
+		}
+		return m, nil
+
+	case "k", "up":
+		if m.staleSelected > 0 {
+			m.staleSelected--
+		}
+		return m, nil
+
+	case "r":
+		// Reset selected ticket to open.
+		if m.staleSelected < len(m.staleTickets) {
+			t := m.staleTickets[m.staleSelected]
+			tickets.UpdateStatus(t.ID, "open", "moe")
+			m.staleTickets = append(m.staleTickets[:m.staleSelected], m.staleTickets[m.staleSelected+1:]...)
+			if m.staleSelected >= len(m.staleTickets) && m.staleSelected > 0 {
+				m.staleSelected--
+			}
+			if len(m.staleTickets) == 0 {
+				m.mode = modeNormal
+			}
+		}
+		return m, nil
+
+	case "a":
+		// Reset all to open.
+		for _, t := range m.staleTickets {
+			tickets.UpdateStatus(t.ID, "open", "moe")
+		}
+		m.staleTickets = nil
+		m.mode = modeNormal
+		return m, nil
+	}
+	return m, nil
+}
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return "Loading..."
 	}
 
 	title := titleStyle.Render(" 🐈‍⬛ moe ")
+
+	// Stale recovery mode shows a full-screen overlay.
+	if m.mode == modeStaleRecovery {
+		return lipgloss.JoinVertical(lipgloss.Left,
+			title,
+			m.renderStaleRecovery(),
+			helpStyle.Render(" [r]eset selected  [a]ll reset  [s]kip all  [j/k] navigate"),
+		)
+	}
 
 	agents := m.pool.Agents()
 	sidebar := m.renderSidebar(agents)
@@ -292,6 +372,25 @@ func (m Model) View() string {
 		statusBar,
 		help,
 	)
+}
+
+func (m Model) renderStaleRecovery() string {
+	var b strings.Builder
+	b.WriteString("\n  Stale tickets found (in_progress with no active agent):\n\n")
+
+	for i, t := range m.staleTickets {
+		prefix := "  "
+		if i == m.staleSelected {
+			prefix = selectedStyle.Render("▸ ")
+		}
+		assignee := "(unassigned)"
+		if t.Assignee != nil {
+			assignee = *t.Assignee
+		}
+		b.WriteString(fmt.Sprintf("%s%s  %s  [%s]\n", prefix, t.ID, t.Title, assignee))
+	}
+
+	return b.String()
 }
 
 func (m Model) renderSidebar(agents []*agent.Agent) string {

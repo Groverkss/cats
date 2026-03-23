@@ -9,14 +9,20 @@ import (
 	"strings"
 )
 
+// Ticket matches br's ReadyIssue / Issue JSON schema.
 type Ticket struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Status   string `json:"status"`
-	Assignee string `json:"assignee"`
-	Type     string `json:"type"`
-	Priority int    `json:"priority"`
-	ParentID string `json:"parent_id"`
+	ID        string  `json:"id"`
+	Title     string  `json:"title"`
+	Status    string  `json:"status"`
+	Assignee  *string `json:"assignee"`
+	IssueType string  `json:"issue_type"`
+	Priority  int     `json:"priority"`
+}
+
+// IssueDetails matches br show --json output.
+type IssueDetails struct {
+	Ticket
+	Parent *string `json:"parent"`
 }
 
 type TopicMeta struct {
@@ -29,60 +35,52 @@ type TopicMeta struct {
 
 // Ready returns tickets that are ready for the given role.
 func Ready(role string) ([]Ticket, error) {
-	out, err := exec.Command("br", "ready", "--assignee="+role, "--format=json").Output()
+	out, err := exec.Command("br", "ready", "--assignee="+role, "--format=json", "--no-auto-import").Output()
 	if err != nil {
-		// br ready with no results exits non-zero sometimes.
-		// Try plain text fallback.
-		return readyFallback(role)
+		return nil, nil // No ready tickets or br error.
 	}
 
 	var tickets []Ticket
 	if err := json.Unmarshal(out, &tickets); err != nil {
-		return readyFallback(role)
+		return nil, nil
 	}
 	return tickets, nil
-}
-
-// readyFallback parses br ready text output when JSON isn't available.
-func readyFallback(role string) ([]Ticket, error) {
-	out, err := exec.Command("br", "ready", "--assignee="+role).CombinedOutput()
-	if err != nil {
-		return nil, nil // No ready tickets.
-	}
-
-	var tickets []Ticket
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || !isTicketLine(line) {
-			continue
-		}
-		// Parse minimal info from text output: "ID  Title  [status]"
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			tickets = append(tickets, Ticket{
-				ID:       parts[0],
-				Title:    strings.Join(parts[1:], " "),
-				Assignee: role,
-			})
-		}
-	}
-	return tickets, nil
-}
-
-func isTicketLine(line string) bool {
-	// Ticket IDs from br typically start with the project prefix.
-	return len(line) > 0 && !strings.HasPrefix(line, "=") && !strings.HasPrefix(line, "-")
 }
 
 // ListByStatus returns tickets with the given status.
 func ListByStatus(status string) ([]Ticket, error) {
-	out, err := exec.Command("br", "list", "--status="+status, "--format=json").CombinedOutput()
+	out, err := exec.Command("br", "list", "--status="+status, "--format=json", "--no-auto-import").Output()
 	if err != nil {
 		return nil, nil
 	}
 	var tickets []Ticket
-	json.Unmarshal(out, &tickets)
+	if err := json.Unmarshal(out, &tickets); err != nil {
+		return nil, nil
+	}
 	return tickets, nil
+}
+
+// Show returns full details for a ticket.
+func Show(id string) (*IssueDetails, error) {
+	out, err := exec.Command("br", "show", id, "--format=json", "--no-auto-import").Output()
+	if err != nil {
+		return nil, fmt.Errorf("br show %s failed: %w", id, err)
+	}
+
+	// br show returns an array even for single IDs.
+	var details []IssueDetails
+	if err := json.Unmarshal(out, &details); err != nil {
+		// Try single object.
+		var detail IssueDetails
+		if err2 := json.Unmarshal(out, &detail); err2 != nil {
+			return nil, fmt.Errorf("parse br show output: %w", err)
+		}
+		return &detail, nil
+	}
+	if len(details) == 0 {
+		return nil, fmt.Errorf("ticket %s not found", id)
+	}
+	return &details[0], nil
 }
 
 // UpdateStatus changes a ticket's status.
@@ -104,55 +102,50 @@ func ResolveTopicForTicket(workspace string, ticket Ticket) (*TopicMeta, error) 
 		return nil, fmt.Errorf("cannot read .topics/: %w", err)
 	}
 
-	// If ticket has a parent, match by epic ID.
-	if ticket.ParentID != "" {
-		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), ".json") {
-				continue
-			}
-			meta, err := loadTopicMeta(filepath.Join(topicsDir, e.Name()))
-			if err != nil {
-				continue
-			}
-			if meta.EpicID == ticket.ParentID && meta.Status == "open" {
-				return meta, nil
-			}
-		}
-	}
-
-	// Fallback: try to get parent from br show.
-	parentID, err := getTicketParent(ticket.ID)
-	if err == nil && parentID != "" {
-		for _, e := range entries {
-			if !strings.HasSuffix(e.Name(), ".json") {
-				continue
-			}
-			meta, err := loadTopicMeta(filepath.Join(topicsDir, e.Name()))
-			if err != nil {
-				continue
-			}
-			if meta.EpicID == parentID && meta.Status == "open" {
-				return meta, nil
-			}
-		}
-	}
-
-	return nil, fmt.Errorf("no topic found for ticket %s", ticket.ID)
-}
-
-func getTicketParent(id string) (string, error) {
-	out, err := exec.Command("br", "show", id, "--format=json").Output()
+	// Get the parent from br show.
+	details, err := Show(ticket.ID)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var data map[string]interface{}
-	if err := json.Unmarshal(out, &data); err != nil {
-		return "", err
+
+	if details.Parent == nil || *details.Parent == "" {
+		return nil, fmt.Errorf("ticket %s has no parent epic", ticket.ID)
 	}
-	if parent, ok := data["parent_id"].(string); ok {
-		return parent, nil
+	parentID := *details.Parent
+
+	// Match parent against topic epic IDs.
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		meta, err := loadTopicMeta(filepath.Join(topicsDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if meta.EpicID == parentID && meta.Status == "open" {
+			return meta, nil
+		}
 	}
-	return "", nil
+
+	// The parent might itself be a child — walk up.
+	parentDetails, err := Show(parentID)
+	if err == nil && parentDetails.Parent != nil && *parentDetails.Parent != "" {
+		grandparentID := *parentDetails.Parent
+		for _, e := range entries {
+			if !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			meta, err := loadTopicMeta(filepath.Join(topicsDir, e.Name()))
+			if err != nil {
+				continue
+			}
+			if meta.EpicID == grandparentID && meta.Status == "open" {
+				return meta, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no topic found for ticket %s (parent: %s)", ticket.ID, parentID)
 }
 
 func loadTopicMeta(path string) (*TopicMeta, error) {
