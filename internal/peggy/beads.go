@@ -31,6 +31,11 @@ func (s *BeadsStore) Init(ctx context.Context) error {
 	return err
 }
 
+func (s *BeadsStore) Sync(ctx context.Context) error {
+	_, err := s.br(ctx, "sync", "--flush-only")
+	return err
+}
+
 // br runs a br command with context timeout and returns stdout.
 func (s *BeadsStore) br(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

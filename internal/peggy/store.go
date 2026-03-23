@@ -67,6 +67,9 @@ type TicketStore interface {
 	// Init initializes the store (create database, etc).
 	Init(ctx context.Context) error
 
+	// Sync flushes store state to a persistent/portable format.
+	Sync(ctx context.Context) error
+
 	// Queries
 	List(ctx context.Context, filter Filter) ([]Ticket, error)
 	Get(ctx context.Context, id string) (*TicketDetail, error)

@@ -183,8 +183,26 @@ func peggyCmd() *cobra.Command {
 		peggyTuiCmd(),
 		peggyTicketCmd(),
 		peggyTopicCmd(),
+		peggySyncCmd(),
 	)
 	return cmd
+}
+
+func peggySyncCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync",
+		Short: "Flush ticket database to portable format",
+		Long:  "Export the ticket database to git-tracked JSONL. Run this before committing workspace state.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ws := requireWorkspace(cmd)
+			store := newStore(cmd, ws)
+			if err := store.Sync(context.Background()); err != nil {
+				return err
+			}
+			fmt.Println("Synced.")
+			return nil
+		},
+	}
 }
 
 func peggyTuiCmd() *cobra.Command {
