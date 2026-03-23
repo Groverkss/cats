@@ -83,14 +83,6 @@ const (
 	focusDetail
 )
 
-// detailView tracks which detail view mode.
-type detailView int
-
-const (
-	detailInfo detailView = iota
-	detailChildren
-)
-
 // Filter presets cycle order. "ready" and "blocked" are special — they use
 // dedicated store methods instead of List with a status filter.
 const filterReady peggy.Status = "_ready"
@@ -123,12 +115,12 @@ type PeggyModel struct {
 	scrollOff  int // scroll offset for list
 
 	// Detail.
-	detail     *peggy.TicketDetail
-	detailView detailView
+	detail *peggy.TicketDetail
 
 	// Topic list.
 	topics        []peggy.Topic
 	topicSelected int
+	topicTickets  []peggy.Ticket // tickets under selected topic
 
 	// Status change overlay.
 	statusOpts     []peggy.Status
@@ -150,6 +142,9 @@ type peggyTicketsMsg struct {
 }
 type peggyDetailMsg struct {
 	detail *peggy.TicketDetail
+}
+type peggyTopicTicketsMsg struct {
+	tickets []peggy.Ticket
 }
 type peggyRefreshMsg struct{}
 
@@ -192,7 +187,15 @@ func (m PeggyModel) fetchTickets() tea.Cmd {
 			tickets, _ = m.store.List(ctx, filter)
 		}
 
-		// Always fetch blocked IDs so we can show correct icons.
+		// Filter out epics — topics represent them.
+		var filtered []peggy.Ticket
+		for _, t := range tickets {
+			if t.Type != "epic" {
+				filtered = append(filtered, t)
+			}
+		}
+
+		// Fetch blocked IDs so we can show correct icons.
 		blockedIDs := make(map[string]bool)
 		blocked, _ := m.store.Blocked(ctx)
 		for _, b := range blocked {
@@ -200,7 +203,28 @@ func (m PeggyModel) fetchTickets() tea.Cmd {
 		}
 
 		topics, _ := m.store.ListTopics(ctx)
-		return peggyTicketsMsg{tickets: tickets, blockedIDs: blockedIDs, topics: topics}
+		return peggyTicketsMsg{tickets: filtered, blockedIDs: blockedIDs, topics: topics}
+	}
+}
+
+func (m PeggyModel) fetchTopicTicketsForSelected() tea.Cmd {
+	if m.topicSelected >= len(m.topics) {
+		return nil
+	}
+	return m.fetchTopicTickets(m.topics[m.topicSelected].EpicID)
+}
+
+func (m PeggyModel) fetchTopicTickets(epicID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		all, _ := m.store.List(ctx, peggy.Filter{})
+		var tickets []peggy.Ticket
+		for _, t := range all {
+			if t.ParentID == epicID && t.Type != "epic" {
+				tickets = append(tickets, t)
+			}
+		}
+		return peggyTopicTicketsMsg{tickets: tickets}
 	}
 }
 
@@ -241,6 +265,10 @@ func (m PeggyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detail = msg.detail
 		return m, nil
 
+	case peggyTopicTicketsMsg:
+		m.topicTickets = msg.tickets
+		return m, nil
+
 	case peggyRefreshMsg:
 		return m, tea.Batch(m.fetchTickets(), peggyRefreshCmd())
 	}
@@ -260,6 +288,7 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.mode == peggyModeTopics {
 			if m.topicSelected < len(m.topics)-1 {
 				m.topicSelected++
+				return m, m.fetchTopicTicketsForSelected()
 			}
 		} else {
 			if m.selected < len(m.tickets)-1 {
@@ -274,6 +303,7 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.mode == peggyModeTopics {
 			if m.topicSelected > 0 {
 				m.topicSelected--
+				return m, m.fetchTopicTicketsForSelected()
 			}
 		} else {
 			if m.selected > 0 {
@@ -303,6 +333,7 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = peggyModeTickets
 		} else {
 			m.mode = peggyModeTopics
+			return m, m.fetchTopicTicketsForSelected()
 		}
 		return m, nil
 
@@ -320,12 +351,6 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "1":
-		m.detailView = detailInfo
-		return m, nil
-	case "2":
-		m.detailView = detailChildren
-		return m, nil
 	}
 
 	return m, nil
@@ -517,13 +542,7 @@ func (m PeggyModel) renderDetailPanel() string {
 	if m.detail == nil {
 		return dimStyle.Render("Select a ticket to view details.")
 	}
-
-	switch m.detailView {
-	case detailChildren:
-		return m.renderChildrenView()
-	default:
-		return m.renderInfoView()
-	}
+	return m.renderInfoView()
 }
 
 func (m PeggyModel) renderInfoView() string {
@@ -562,30 +581,6 @@ func (m PeggyModel) renderInfoView() string {
 		}
 	}
 
-	if len(d.Children) > 0 {
-		b.WriteString(dimStyle.Render("\n[2] children"))
-	}
-
-	return b.String()
-}
-
-func (m PeggyModel) renderChildrenView() string {
-	d := m.detail
-	var b strings.Builder
-
-	b.WriteString(topicNameStyle.Render(d.Title) + "\n")
-	b.WriteString(dimStyle.Render(strings.Repeat("-", min(len(d.Title), 40))) + "\n")
-
-	b.WriteString(labelStyle.Render("Children:") + "\n")
-	if len(d.Children) == 0 {
-		b.WriteString(dimStyle.Render("  (no children)"))
-	} else {
-		for _, childID := range d.Children {
-			b.WriteString(fmt.Sprintf("  %s\n", childID))
-		}
-	}
-
-	b.WriteString(dimStyle.Render("\n[1] info"))
 	return b.String()
 }
 
@@ -639,7 +634,20 @@ func (m PeggyModel) renderTopicDetail() string {
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Status:"), statusStyle.Render(t.Status)))
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Repo:"), topicFieldStyle.Render(t.Repo)))
 	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Branch:"), topicFieldStyle.Render(t.Branch)))
-	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Worktree:"), topicFieldStyle.Render(t.Worktree)))
+
+	// Show tickets under this topic.
+	if len(m.topicTickets) > 0 {
+		b.WriteString("\n" + labelStyle.Render("Tickets:") + "\n")
+		for _, tk := range m.topicTickets {
+			icon := statusIcon(tk.Status)
+			if m.blockedIDs[tk.ID] {
+				icon = statusIcon(peggy.StatusBlocked)
+			}
+			b.WriteString(fmt.Sprintf("  %s %s %s %s\n", icon, priorityStr(tk.Priority), styledType(tk.Type), ticketTitleStyle.Render(tk.Title)))
+		}
+	} else {
+		b.WriteString("\n" + dimStyle.Render("No tickets.") + "\n")
+	}
 
 	return b.String()
 }
