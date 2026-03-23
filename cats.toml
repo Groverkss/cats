@@ -1,0 +1,9 @@
+[pool]
+poll_interval = "5s"
+max_retries = 2
+
+[sandbox]
+gpu = false
+network = true
+extra_ro = []
+extra_rw = []

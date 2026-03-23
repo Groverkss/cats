@@ -1,0 +1,15 @@
+# Build output
+cmd/moe/moe
+/moe
+
+# Worktrees managed by git
+.worktrees/
+
+# Logs
+logs/*.log
+
+# Temp
+.tmp/
+
+# Beads database (JSONL is tracked, DB is local)
+.beads/beads.db
