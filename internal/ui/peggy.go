@@ -385,7 +385,11 @@ func (m PeggyModel) handleStatusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			t := m.tickets[m.selected]
 			newStatus := m.statusOpts[m.statusSelected]
 			ctx := context.Background()
-			m.store.UpdateStatus(ctx, t.ID, newStatus, "user")
+			if newStatus == peggy.StatusCompleted {
+				m.store.Close(ctx, t.ID, "Completed via TUI")
+			} else {
+				m.store.UpdateStatus(ctx, t.ID, newStatus, "user")
+			}
 			m.mode = peggyModeTickets
 			return m, m.fetchTickets()
 		}
