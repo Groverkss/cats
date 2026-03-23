@@ -36,7 +36,7 @@ func (s *BeadsStore) br(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	args = append(args, "--no-auto-import", "--lock-timeout=5000")
+	args = append(args, "--no-auto-import", "--lock-timeout=500")
 	cmd := exec.CommandContext(ctx, s.brPath, args...)
 	cmd.Dir = s.workspace
 	cmd.Stdin = nil
