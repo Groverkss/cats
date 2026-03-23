@@ -109,7 +109,11 @@ func (p *Pool) AssignTicket(a *agent.Agent, ticket tickets.Ticket, topic *ticket
 	logDir := filepath.Join(p.workspace, "logs")
 	os.MkdirAll(logDir, 0755)
 
-	worktree := filepath.Join(p.workspace, topic.Worktree)
+	// Worktree path is absolute in topic metadata.
+	worktree := topic.Worktree
+	if !filepath.IsAbs(worktree) {
+		worktree = filepath.Join(p.workspace, worktree)
+	}
 
 	err = a.Start(
 		p.workspace,

@@ -12,7 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="$(dirname "$SCRIPT_DIR")"
 TOPICS_DIR="$WORKSPACE/.topics"
-WORKTREES_DIR="$WORKSPACE/.worktrees"
+WORKTREES_DIR="${CATS_WORKTREES_DIR:-/tmp/cats-worktrees}"
 
 mkdir -p "$TOPICS_DIR" "$WORKTREES_DIR"
 
@@ -54,7 +54,7 @@ cmd_create() {
 {
   "name": "$name",
   "branch": "$branch",
-  "worktree": ".worktrees/$name",
+  "worktree": "$worktree",
   "epic_id": "$epic_id",
   "status": "open",
   "created": "$(date -Iseconds)"

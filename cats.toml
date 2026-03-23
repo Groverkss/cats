@@ -2,6 +2,10 @@
 poll_interval = "5s"
 max_retries = 2
 
+# Worktrees directory (default: /tmp/cats-worktrees)
+# Set CATS_WORKTREES_DIR env var or override in topic.sh
+# worktrees_dir = "/tmp/cats-worktrees"
+
 [sandbox]
 gpu = false
 network = true

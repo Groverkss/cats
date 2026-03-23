@@ -66,6 +66,9 @@ BWRAP_ARGS=(
     # The workspace: full read-write (on top of tmpfs home).
     --bind "$WORKSPACE" "$WORKSPACE"
 
+    # Workdir bind (if outside workspace, e.g. /tmp worktrees).
+    # Added conditionally below.
+
     # Claude Code config and cache (persisted).
     --bind "$HOME_DIR/.claude" "$HOME_DIR/.claude"
     --bind "$HOME_DIR/.cache" "$HOME_DIR/.cache"
@@ -114,6 +117,11 @@ BWRAP_ARGS=(
 [[ -d "$HOME_DIR/.npm" ]] && BWRAP_ARGS+=(--bind "$HOME_DIR/.npm" "$HOME_DIR/.npm")
 [[ -f "$HOME_DIR/.gitconfig" ]] && BWRAP_ARGS+=(--ro-bind "$HOME_DIR/.gitconfig" "$HOME_DIR/.gitconfig")
 [[ -d "$WORKSPACE/.venv" ]] && BWRAP_ARGS+=(--setenv VIRTUAL_ENV "$WORKSPACE/.venv")
+
+# Bind workdir if it's outside the workspace (e.g. /tmp worktrees).
+if [[ "$WORKDIR" != "$WORKSPACE"* ]]; then
+    BWRAP_ARGS+=(--bind "$WORKDIR" "$WORKDIR")
+fi
 
 # Tmp: workspace-local if exists, else tmpfs.
 if [[ -d "$WORKSPACE/.tmp" ]]; then
