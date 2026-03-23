@@ -30,13 +30,40 @@ var (
 				Padding(0, 1)
 
 	headerBarStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+			Foreground(lipgloss.Color("245"))
 
 	dimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240"))
 
-	p0Style = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	p1Style = lipgloss.NewStyle()
+	// Priority styles.
+	p0Style = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true) // red
+	p1Style = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))            // orange
+	p2Style = lipgloss.NewStyle().Foreground(lipgloss.Color("250"))            // light gray
+	p3Style = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // gray
+	p4Style = lipgloss.NewStyle().Foreground(lipgloss.Color("236"))            // dark gray
+
+	// Ticket type styles.
+	typeTaskStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("75"))  // blue
+	typeBugStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // red
+	typeReviewStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("213")) // pink
+	typeEpicStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("141")) // purple
+
+	// Assignee styles.
+	assigneeCoderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("117")) // light blue
+	assigneeReviewerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("213")) // pink
+	assigneeOtherStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("252")) // white
+
+	// Detail panel label style.
+	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Bold(true)
+
+	// Topic styles.
+	topicOpenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true) // green
+	topicClosedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // gray
+	topicNameStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true) // white bold
+	topicFieldStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("117"))           // light blue
+
+	// Title in list.
+	ticketTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 )
 
 // peggyMode tracks what view we're in.
@@ -65,12 +92,16 @@ const (
 	detailRaw
 )
 
-// Filter presets cycle order.
+// Filter presets cycle order. "ready" and "blocked" are special — they use
+// dedicated store methods instead of List with a status filter.
+const filterReady peggy.Status = "_ready"
+
 var filterCycle = []peggy.Status{
-	"", // all
+	"",          // all
+	filterReady, // ready (open + unblocked)
 	peggy.StatusOpen,
 	peggy.StatusInProgress,
-	peggy.StatusBlocked,
+	peggy.StatusBlocked, // blocked (has unmet deps)
 	peggy.StatusCompleted,
 	peggy.StatusCancelled,
 }
@@ -139,15 +170,23 @@ func (m PeggyModel) fetchTickets() tea.Cmd {
 		ctx := context.Background()
 		var tickets []peggy.Ticket
 
-		if m.filterIdx > 0 && m.filterIdx < len(filterCycle) && filterCycle[m.filterIdx] == peggy.StatusBlocked {
-			// "blocked" uses the dedicated Blocked() query since br tracks
-			// blocked state separately from the status field.
+		currentFilter := peggy.Status("")
+		if m.filterIdx > 0 && m.filterIdx < len(filterCycle) {
+			currentFilter = filterCycle[m.filterIdx]
+		}
+
+		switch currentFilter {
+		case peggy.StatusBlocked:
 			tickets, _ = m.store.Blocked(ctx)
-		} else {
+		case filterReady:
+			// Combine ready tickets for all roles.
+			coderReady, _ := m.store.Ready(ctx, "coder")
+			reviewerReady, _ := m.store.Ready(ctx, "reviewer")
+			tickets = append(coderReady, reviewerReady...)
+		default:
 			var filter peggy.Filter
-			if m.filterIdx > 0 && m.filterIdx < len(filterCycle) {
-				s := filterCycle[m.filterIdx]
-				filter.Status = &s
+			if currentFilter != "" {
+				filter.Status = &currentFilter
 			}
 			tickets, _ = m.store.List(ctx, filter)
 		}
@@ -272,18 +311,6 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "r":
-		// Reopen: set closed/cancelled ticket to open.
-		if len(m.tickets) > 0 && m.selected < len(m.tickets) {
-			t := m.tickets[m.selected]
-			if t.Status == peggy.StatusCompleted || t.Status == peggy.StatusCancelled {
-				ctx := context.Background()
-				m.store.UpdateStatus(ctx, t.ID, peggy.StatusOpen, "user")
-				return m, m.fetchTickets()
-			}
-		}
-		return m, nil
-
 	case "1":
 		m.detailView = detailInfo
 		return m, nil
@@ -361,7 +388,12 @@ func (m PeggyModel) View() string {
 	// Header bar with active filter.
 	filterLabel := "all"
 	if m.filterIdx > 0 && m.filterIdx < len(filterCycle) {
-		filterLabel = string(filterCycle[m.filterIdx])
+		f := filterCycle[m.filterIdx]
+		if f == filterReady {
+			filterLabel = "ready"
+		} else {
+			filterLabel = string(f)
+		}
 	}
 	header := headerBarStyle.Render(fmt.Sprintf(" filter: [%s]  tickets: %d  topics: %d",
 		filterLabel, len(m.tickets), len(m.topics)))
@@ -451,6 +483,7 @@ func (m PeggyModel) renderTicketList() string {
 
 		icon := statusIcon(t.Status)
 		prio := priorityStr(t.Priority)
+		typ := styledType(t.Type)
 
 		// Truncate title.
 		title := t.Title
@@ -459,7 +492,7 @@ func (m PeggyModel) renderTicketList() string {
 			title = title[:maxTitleLen-1] + "~"
 		}
 
-		line := fmt.Sprintf("%s%s %s %-5s %s", prefix, icon, prio, t.Type, title)
+		line := fmt.Sprintf("%s%s %s %s %s", prefix, icon, prio, typ, ticketTitleStyle.Render(title))
 		b.WriteString(line + "\n")
 	}
 
@@ -490,30 +523,29 @@ func (m PeggyModel) renderInfoView() string {
 	d := m.detail
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("%s\n", d.Title))
-	b.WriteString(strings.Repeat("-", min(len(d.Title), 40)) + "\n")
-	b.WriteString(fmt.Sprintf("ID:       %s\n", d.ID))
-	b.WriteString(fmt.Sprintf("Status:   %s %s\n", statusIcon(d.Status), d.Status))
-	b.WriteString(fmt.Sprintf("Priority: %s\n", priorityStr(d.Priority)))
-	b.WriteString(fmt.Sprintf("Type:     %s\n", d.Type))
+	b.WriteString(topicNameStyle.Render(d.Title) + "\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("-", min(len(d.Title), 40))) + "\n")
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("ID:"), d.ID))
+	b.WriteString(fmt.Sprintf("%s %s %s\n", labelStyle.Render("Status:"), statusIcon(d.Status), styledStatus(d.Status)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Priority:"), priorityStr(d.Priority)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Type:"), styledType(d.Type)))
 
 	if d.Assignee != "" {
-		b.WriteString(fmt.Sprintf("Assignee: %s\n", d.Assignee))
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Assignee:"), styledAssignee(d.Assignee)))
 	}
 	if d.ParentID != "" {
-		b.WriteString(fmt.Sprintf("Parent:   %s\n", d.ParentID))
+		b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Parent:"), dimStyle.Render(d.ParentID)))
 	}
 
 	if d.Description != "" {
-		b.WriteString("\nDescription:\n")
-		// Wrap description lines.
+		b.WriteString("\n" + labelStyle.Render("Description:") + "\n")
 		for _, line := range strings.Split(d.Description, "\n") {
 			b.WriteString("  " + line + "\n")
 		}
 	}
 
 	if len(d.AcceptanceCriteria) > 0 {
-		b.WriteString("\nAcceptance Criteria:\n")
+		b.WriteString("\n" + labelStyle.Render("Acceptance Criteria:") + "\n")
 		for _, c := range d.AcceptanceCriteria {
 			b.WriteString("  [ ] " + c + "\n")
 		}
@@ -579,14 +611,16 @@ func (m PeggyModel) renderTopicList() string {
 			prefix = selectedStyle.Render("| ")
 		}
 
-		statusIcon := "o"
-		style := dimStyle
+		var icon, name string
 		if t.Status == "open" {
-			statusIcon = "*"
-			style = activeStyle
+			icon = topicOpenStyle.Render("*")
+			name = topicNameStyle.Render(t.Name)
+		} else {
+			icon = topicClosedStyle.Render("o")
+			name = topicClosedStyle.Render(t.Name)
 		}
 
-		b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, style.Render(statusIcon), t.Name))
+		b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, icon, name))
 	}
 
 	return b.String()
@@ -600,13 +634,17 @@ func (m PeggyModel) renderTopicDetail() string {
 	t := m.topics[m.topicSelected]
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("Topic: %s\n", t.Name))
-	b.WriteString(strings.Repeat("-", 30) + "\n")
-	b.WriteString(fmt.Sprintf("Status:   %s\n", t.Status))
-	b.WriteString(fmt.Sprintf("Repo:     %s\n", t.Repo))
-	b.WriteString(fmt.Sprintf("Branch:   %s\n", t.Branch))
-	b.WriteString(fmt.Sprintf("Worktree: %s\n", t.Worktree))
-	b.WriteString(fmt.Sprintf("Epic:     %s\n", t.EpicID))
+	b.WriteString(topicNameStyle.Render("Topic: "+t.Name) + "\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("-", 30)) + "\n")
+
+	statusStyle := topicOpenStyle
+	if t.Status != "open" {
+		statusStyle = topicClosedStyle
+	}
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Status:"), statusStyle.Render(t.Status)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Repo:"), topicFieldStyle.Render(t.Repo)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Branch:"), topicFieldStyle.Render(t.Branch)))
+	b.WriteString(fmt.Sprintf("%s %s\n", labelStyle.Render("Worktree:"), topicFieldStyle.Render(t.Worktree)))
 
 	return b.String()
 }
@@ -636,7 +674,7 @@ func (m PeggyModel) renderHelp() string {
 	if m.mode == peggyModeTopics {
 		return helpStyle.Render(" [t]ickets  [j/k] navigate  [q]uit")
 	}
-	return helpStyle.Render(" [f]ilter  [s]tatus  [r]eopen  [t]opics  [tab] focus  [1/2/3] detail view  [j/k] navigate  [q]uit")
+	return helpStyle.Render(" [f]ilter  [s]tatus  [t]opics  [tab] focus  [1/2/3] detail view  [j/k] navigate  [q]uit")
 }
 
 // --- helpers ---
@@ -660,13 +698,62 @@ func statusIcon(s peggy.Status) string {
 
 func priorityStr(p int) string {
 	label := fmt.Sprintf("P%d", p)
-	if p == 0 {
+	switch p {
+	case 0:
 		return p0Style.Render(label)
-	}
-	if p <= 1 {
+	case 1:
 		return p1Style.Render(label)
+	case 2:
+		return p2Style.Render(label)
+	case 3:
+		return p3Style.Render(label)
+	default:
+		return p4Style.Render(label)
 	}
-	return dimStyle.Render(label)
+}
+
+func styledType(t string) string {
+	padded := fmt.Sprintf("%-6s", t)
+	switch t {
+	case "task":
+		return typeTaskStyle.Render(padded)
+	case "bug":
+		return typeBugStyle.Render(padded)
+	case "review":
+		return typeReviewStyle.Render(padded)
+	case "epic":
+		return typeEpicStyle.Render(padded)
+	default:
+		return padded
+	}
+}
+
+func styledAssignee(a string) string {
+	switch {
+	case strings.HasPrefix(a, "coder"):
+		return assigneeCoderStyle.Render(a)
+	case strings.HasPrefix(a, "reviewer"):
+		return assigneeReviewerStyle.Render(a)
+	default:
+		return assigneeOtherStyle.Render(a)
+	}
+}
+
+func styledStatus(s peggy.Status) string {
+	switch s {
+	case peggy.StatusOpen:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(string(s))
+	case peggy.StatusInProgress:
+		return activeStyle.Render(string(s))
+	case peggy.StatusBlocked:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Render(string(s))
+	case peggy.StatusCompleted:
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render(string(s))
+	case peggy.StatusCancelled:
+		return dimStyle.Render(string(s))
+	default:
+		return string(s)
+	}
 }
 
 func min(a, b int) int {
