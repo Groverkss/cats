@@ -70,13 +70,14 @@ func (s *BeadsStore) brJSON(ctx context.Context, result interface{}, args ...str
 
 // brTicket is the raw shape br returns for tickets.
 type brTicket struct {
-	ID        string  `json:"id"`
-	Title     string  `json:"title"`
-	Status    string  `json:"status"`
-	Assignee  *string `json:"assignee"`
-	IssueType string  `json:"issue_type"`
-	Priority  int     `json:"priority"`
-	Parent    *string `json:"parent"`
+	ID          string  `json:"id"`
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	Status      string  `json:"status"`
+	Assignee    *string `json:"assignee"`
+	IssueType   string  `json:"issue_type"`
+	Priority    int     `json:"priority"`
+	Parent      *string `json:"parent"`
 }
 
 func toBrTicket(t brTicket) Ticket {
@@ -141,7 +142,8 @@ func (s *BeadsStore) Get(ctx context.Context, id string) (*TicketDetail, error) 
 
 	t := raw[0]
 	detail := &TicketDetail{
-		Ticket: toBrTicket(t),
+		Ticket:      toBrTicket(t),
+		Description: t.Description,
 	}
 	return detail, nil
 }

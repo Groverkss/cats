@@ -89,7 +89,6 @@ type detailView int
 const (
 	detailInfo detailView = iota
 	detailChildren
-	detailRaw
 )
 
 // Filter presets cycle order. "ready" and "blocked" are special — they use
@@ -327,9 +326,6 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "2":
 		m.detailView = detailChildren
 		return m, nil
-	case "3":
-		m.detailView = detailRaw
-		return m, nil
 	}
 
 	return m, nil
@@ -525,8 +521,6 @@ func (m PeggyModel) renderDetailPanel() string {
 	switch m.detailView {
 	case detailChildren:
 		return m.renderChildrenView()
-	case detailRaw:
-		return m.renderRawView()
 	default:
 		return m.renderInfoView()
 	}
@@ -568,7 +562,9 @@ func (m PeggyModel) renderInfoView() string {
 		}
 	}
 
-	b.WriteString(dimStyle.Render("\n[1]info [2]children [3]raw"))
+	if len(d.Children) > 0 {
+		b.WriteString(dimStyle.Render("\n[2] children"))
+	}
 
 	return b.String()
 }
@@ -577,9 +573,10 @@ func (m PeggyModel) renderChildrenView() string {
 	d := m.detail
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("Children of %s\n", d.ID))
-	b.WriteString(strings.Repeat("-", 30) + "\n")
+	b.WriteString(topicNameStyle.Render(d.Title) + "\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("-", min(len(d.Title), 40))) + "\n")
 
+	b.WriteString(labelStyle.Render("Children:") + "\n")
 	if len(d.Children) == 0 {
 		b.WriteString(dimStyle.Render("  (no children)"))
 	} else {
@@ -588,26 +585,7 @@ func (m PeggyModel) renderChildrenView() string {
 		}
 	}
 
-	b.WriteString(dimStyle.Render("\n[1]info [2]children [3]raw"))
-	return b.String()
-}
-
-func (m PeggyModel) renderRawView() string {
-	if m.detail == nil {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("ID:       %s\n", m.detail.ID))
-	b.WriteString(fmt.Sprintf("Title:    %s\n", m.detail.Title))
-	b.WriteString(fmt.Sprintf("Status:   %s\n", m.detail.Status))
-	b.WriteString(fmt.Sprintf("Type:     %s\n", m.detail.Type))
-	b.WriteString(fmt.Sprintf("Priority: %d\n", m.detail.Priority))
-	b.WriteString(fmt.Sprintf("Assignee: %s\n", m.detail.Assignee))
-	b.WriteString(fmt.Sprintf("Parent:   %s\n", m.detail.ParentID))
-	if m.detail.Description != "" {
-		b.WriteString(fmt.Sprintf("Desc:     %s\n", m.detail.Description))
-	}
-	b.WriteString(dimStyle.Render("\n[1]info [2]children [3]raw"))
+	b.WriteString(dimStyle.Render("\n[1] info"))
 	return b.String()
 }
 
@@ -691,7 +669,7 @@ func (m PeggyModel) renderHelp() string {
 	if m.mode == peggyModeTopics {
 		return helpStyle.Render(" [t]ickets  [j/k] navigate  [q]uit")
 	}
-	return helpStyle.Render(" [f]ilter  [s]tatus  [t]opics  [tab] focus  [1/2/3] detail view  [j/k] navigate  [q]uit")
+	return helpStyle.Render(" [f]ilter  [s]tatus  [t]opics  [tab] focus  [j/k] navigate  [q]uit")
 }
 
 // --- helpers ---
