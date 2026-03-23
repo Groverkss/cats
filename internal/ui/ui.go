@@ -108,6 +108,7 @@ func New(p *pool.Pool, workspace string) Model {
 
 // Messages.
 type tickMsg struct{}
+type refreshMsg struct{} // fast refresh for output panel
 type pollMsg struct {
 	readyCoder      int
 	readyReviewer   int
@@ -124,6 +125,7 @@ type staleMsg struct {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(),
+		refreshCmd(),
 		checkStaleCmd,
 	)
 }
@@ -137,6 +139,13 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(
 		5*time.Second,
 		func(_ time.Time) tea.Msg { return tickMsg{} },
+	)
+}
+
+func refreshCmd() tea.Cmd {
+	return tea.Tick(
+		500*time.Millisecond,
+		func(_ time.Time) tea.Msg { return refreshMsg{} },
 	)
 }
 
@@ -199,6 +208,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+
+	case refreshMsg:
+		// Fast refresh — just re-renders the view (picks up new PTY output).
+		return m, refreshCmd()
 
 	case tickMsg:
 		return m, tea.Batch(
