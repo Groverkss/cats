@@ -133,9 +133,14 @@ func (a *Agent) readStreamJSON(r interface{ Read([]byte) (int, error) }) {
 		line := scanner.Bytes()
 
 		// Parse stream-json to extract display text.
+		// If the line isn't valid JSON, show it raw (e.g. sandbox/process errors).
 		text := extractDisplayText(line)
 		if text == "" {
-			continue
+			trimmed := strings.TrimSpace(string(line))
+			if trimmed == "" {
+				continue
+			}
+			text = trimmed + "\n"
 		}
 
 		cleaned := ansiRegex.ReplaceAllString(text, "")
@@ -369,7 +374,7 @@ func (a *Agent) IsAlive() bool {
 	return a.cmd.Process.Signal(syscall.Signal(0)) == nil
 }
 
-// Reset returns the agent to idle state.
+// Reset returns the agent to idle state, preserving output from the last run.
 func (a *Agent) Reset() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -377,6 +382,5 @@ func (a *Agent) Reset() {
 	a.TicketID = ""
 	a.Topic = ""
 	a.Branch = ""
-	a.output = nil
 	a.cmd = nil
 }
