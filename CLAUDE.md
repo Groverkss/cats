@@ -9,10 +9,10 @@ provides all functionality through subcommands.
 
 ```
 cats kitten              Initialize a new workspace
-cats peggy               Ticket + topic management TUI
-cats peggy ticket ...    Ticket CLI (list, show, create, ready, close, update)
+cats peggy tui           Ticket + topic management TUI
+cats peggy ticket ...    Ticket CLI (list, show, create, ready, close, update, dep, blocked)
 cats peggy topic ...     Topic CLI (create, list, status, close)
-cats moe                 Agent pool manager TUI
+cats moe tui             Agent pool manager TUI
 cats plan                Launch the planner agent (interactive claude session)
 cats box                 Sandboxed shell in a worktree
 ```

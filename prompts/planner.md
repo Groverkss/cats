@@ -40,10 +40,10 @@ A topic is a unit of work: a git branch, a worktree, and a group of tickets.
 
 ```bash
 # Create a new topic
-cats peggy topic create <name> --repo <absolute-path-to-repo> "<description>"
+cats peggy topic create <name> --repo <absolute-path-to-repo> --description "<description>"
 
 # Example:
-cats peggy topic create auth-flow --repo /home/user/projects/myapp "Add JWT authentication to the API"
+cats peggy topic create auth-flow --repo /home/user/projects/myapp --description "Add JWT authentication to the API"
 
 # List all topics
 cats peggy topic list
@@ -149,7 +149,7 @@ Use dependencies to enforce ordering:
 
 ```bash
 # 1. Create a topic
-cats peggy topic create auth-flow --repo /home/user/projects/myapp "Add JWT authentication"
+cats peggy topic create auth-flow --repo /home/user/projects/myapp --description "Add JWT authentication"
 
 # 2. Create the implementation ticket
 cats peggy ticket create \
