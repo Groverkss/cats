@@ -20,8 +20,10 @@ import (
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "cats",
-		Short: "Multi-agent workspace coordination",
+		Use:           "cats",
+		Short:         "Multi-agent workspace coordination",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 	}
 
 	rootCmd.AddCommand(
@@ -32,7 +34,10 @@ func main() {
 		boxCmd(),
 	)
 
-	rootCmd.Execute()
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
 // --- workspace helpers ---
@@ -130,6 +135,15 @@ extra_rw = []
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			os.WriteFile(path, []byte(content), 0644)
 		}
+	}
+
+	// Initialize the ticket store.
+	store, err := peggy.NewBeadsStore(dir)
+	if err != nil {
+		return fmt.Errorf("failed to initialize ticket store: %w", err)
+	}
+	if err := store.Init(context.Background()); err != nil {
+		return fmt.Errorf("failed to initialize ticket store: %w", err)
 	}
 
 	if err := copySelfTo(filepath.Join(dir, "cats")); err != nil {

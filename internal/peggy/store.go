@@ -64,6 +64,9 @@ type TopicOpts struct {
 
 // TicketStore abstracts the ticket backend.
 type TicketStore interface {
+	// Init initializes the store (create database, etc).
+	Init(ctx context.Context) error
+
 	// Queries
 	List(ctx context.Context, filter Filter) ([]Ticket, error)
 	Get(ctx context.Context, id string) (*TicketDetail, error)

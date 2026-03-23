@@ -4,18 +4,16 @@
 # Usage: ./test/test-peggy.sh [path-to-cats-binary]
 #
 # Requires: br, git
-# Creates a temporary workspace and test repo, runs through ticket and topic
-# lifecycle, verifies output at each step.
 
 set -euo pipefail
 
-CATS="${1:-./cats}"
-TMPDIR="$(mktemp -d)"
-WORKSPACE="$TMPDIR/workspace"
-REPO="$TMPDIR/repo"
+CATS="$(cd "$(dirname "${1:-./cats}")" && pwd)/$(basename "${1:-./cats}")"
+TESTDIR="$(cd "$(dirname "$0")/.." && pwd)/.tmp/test-peggy-$$"
+WORKSPACE="$TESTDIR/workspace"
+REPO="$TESTDIR/repo"
 
 cleanup() {
-    rm -rf "$TMPDIR"
+    rm -rf "$TESTDIR"
 }
 trap cleanup EXIT
 
@@ -26,11 +24,11 @@ assert_ok() {
     local desc="$1"; shift
     if "$@" > /dev/null 2>&1; then
         echo "  PASS: $desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         echo "  FAIL: $desc"
         echo "    Command: $*"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -38,10 +36,10 @@ assert_fail() {
     local desc="$1"; shift
     if "$@" > /dev/null 2>&1; then
         echo "  FAIL: $desc (expected failure)"
-        ((fail++))
+        fail=$((fail + 1))
     else
         echo "  PASS: $desc"
-        ((pass++))
+        pass=$((pass + 1))
     fi
 }
 
@@ -50,27 +48,27 @@ assert_contains() {
     local expected="$2"; shift 2
     local output
     output=$("$@" 2>&1) || true
-    if echo "$output" | grep -q "$expected"; then
+    if echo "$output" | grep -qF -- "$expected"; then
         echo "  PASS: $desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         echo "  FAIL: $desc"
         echo "    Expected to contain: $expected"
         echo "    Got: $output"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
 echo "=== Setting up test environment ==="
 
+mkdir -p "$REPO" "$WORKSPACE"
+
 # Create test repo.
-mkdir -p "$REPO"
 git -C "$REPO" init -b main
 echo "test" > "$REPO/README.md"
 git -C "$REPO" add . && git -C "$REPO" commit -m "init" --allow-empty
 
 # Create workspace.
-mkdir -p "$WORKSPACE"
 cd "$WORKSPACE"
 "$CATS" kitten
 

@@ -26,13 +26,20 @@ func NewBeadsStore(workspace string) (*BeadsStore, error) {
 	return &BeadsStore{workspace: workspace, brPath: brPath}, nil
 }
 
+func (s *BeadsStore) Init(ctx context.Context) error {
+	_, err := s.br(ctx, "init", "--prefix=ws")
+	return err
+}
+
 // br runs a br command with context timeout and returns stdout.
 func (s *BeadsStore) br(ctx context.Context, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	args = append(args, "--no-auto-import")
 	cmd := exec.CommandContext(ctx, s.brPath, args...)
 	cmd.Dir = s.workspace
+	cmd.Stdin = nil
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -44,7 +51,8 @@ func (s *BeadsStore) br(ctx context.Context, args ...string) ([]byte, error) {
 
 // brJSON runs a br command with --format=json and parses the result.
 func (s *BeadsStore) brJSON(ctx context.Context, result interface{}, args ...string) error {
-	args = append(args, "--format=json", "--no-auto-import")
+	args = append(args, "--format=json")
+	// Note: --no-auto-import is already added by br()
 	out, err := s.br(ctx, args...)
 	if err != nil {
 		return err
@@ -108,7 +116,7 @@ func (s *BeadsStore) List(ctx context.Context, filter Filter) ([]Ticket, error) 
 }
 
 func (s *BeadsStore) Get(ctx context.Context, id string) (*TicketDetail, error) {
-	out, err := s.br(ctx, "show", id, "--format=json", "--no-auto-import")
+	out, err := s.br(ctx, "show", id, "--format=json")
 	if err != nil {
 		return nil, err
 	}
@@ -216,17 +224,20 @@ func (s *BeadsStore) RemoveDep(ctx context.Context, id string, dependsOn string)
 }
 
 func (s *BeadsStore) ListDeps(ctx context.Context, id string) ([]string, error) {
-	// br dep list returns dependency info as JSON.
 	type brDep struct {
-		DependsOn string `json:"depends_on"`
+		DependsOnID string `json:"depends_on_id"`
+		Type        string `json:"type"`
 	}
 	var deps []brDep
 	if err := s.brJSON(ctx, &deps, "dep", "list", id); err != nil {
 		return nil, err
 	}
-	ids := make([]string, len(deps))
-	for i, d := range deps {
-		ids[i] = d.DependsOn
+	var ids []string
+	for _, d := range deps {
+		// Only return explicit block dependencies, not parent-child.
+		if d.Type == "blocks" {
+			ids = append(ids, d.DependsOnID)
+		}
 	}
 	return ids, nil
 }

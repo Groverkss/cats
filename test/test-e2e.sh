@@ -4,18 +4,16 @@
 # Usage: ./test/test-e2e.sh [path-to-cats-binary]
 #
 # Requires: br, git, bwrap
-# Simulates the full workflow: init workspace, create topic, create tickets
-# with dependencies, verify readiness logic, sandbox, and cleanup.
 
 set -euo pipefail
 
-CATS="${1:-./cats}"
-TMPDIR="$(mktemp -d)"
-WORKSPACE="$TMPDIR/workspace"
-REPO="$TMPDIR/repo"
+CATS="$(cd "$(dirname "${1:-./cats}")" && pwd)/$(basename "${1:-./cats}")"
+TESTDIR="$(cd "$(dirname "$0")/.." && pwd)/.tmp/test-e2e-$$"
+WORKSPACE="$TESTDIR/workspace"
+REPO="$TESTDIR/repo"
 
 cleanup() {
-    rm -rf "$TMPDIR"
+    rm -rf "$TESTDIR"
 }
 trap cleanup EXIT
 
@@ -26,11 +24,11 @@ assert_ok() {
     local desc="$1"; shift
     if "$@" > /dev/null 2>&1; then
         echo "  PASS: $desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         echo "  FAIL: $desc"
         echo "    Command: $*"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -38,10 +36,10 @@ assert_fail() {
     local desc="$1"; shift
     if "$@" > /dev/null 2>&1; then
         echo "  FAIL: $desc (expected failure)"
-        ((fail++))
+        fail=$((fail + 1))
     else
         echo "  PASS: $desc"
-        ((pass++))
+        pass=$((pass + 1))
     fi
 }
 
@@ -50,14 +48,14 @@ assert_contains() {
     local expected="$2"; shift 2
     local output
     output=$("$@" 2>&1) || true
-    if echo "$output" | grep -q "$expected"; then
+    if echo "$output" | grep -qF -- "$expected"; then
         echo "  PASS: $desc"
-        ((pass++))
+        pass=$((pass + 1))
     else
         echo "  FAIL: $desc"
         echo "    Expected to contain: $expected"
         echo "    Got: $output"
-        ((fail++))
+        fail=$((fail + 1))
     fi
 }
 
@@ -66,28 +64,28 @@ assert_not_contains() {
     local unexpected="$2"; shift 2
     local output
     output=$("$@" 2>&1) || true
-    if echo "$output" | grep -q "$unexpected"; then
+    if echo "$output" | grep -qF -- "$unexpected"; then
         echo "  FAIL: $desc"
         echo "    Should not contain: $unexpected"
         echo "    Got: $output"
-        ((fail++))
+        fail=$((fail + 1))
     else
         echo "  PASS: $desc"
-        ((pass++))
+        pass=$((pass + 1))
     fi
 }
 
 echo "=== Phase 1: Setup ==="
 
+mkdir -p "$REPO/internal/api" "$WORKSPACE"
+
 # Create a git repo with some content.
-mkdir -p "$REPO/internal/api"
 git -C "$REPO" init -b main
 echo "# Test Project" > "$REPO/README.md"
 echo "package api" > "$REPO/internal/api/router.go"
 git -C "$REPO" add . && git -C "$REPO" commit -m "init"
 
 # Initialize workspace.
-mkdir -p "$WORKSPACE"
 cd "$WORKSPACE"
 "$CATS" kitten
 
@@ -138,7 +136,6 @@ echo "  Review ticket: $T_REVIEW (depends on $T_IMPL, $T_TEST)"
 echo ""
 echo "=== Phase 4: Verify dependency-based readiness ==="
 
-# Only the implementation ticket should be ready.
 assert_contains "impl ticket is ready" "$T_IMPL" \
     "$CATS" peggy ticket ready --role=coder
 
@@ -160,11 +157,9 @@ echo "=== Phase 5: Complete implementation, verify unblocking ==="
 "$CATS" peggy ticket update "$T_IMPL" --status=in_progress > /dev/null
 "$CATS" peggy ticket close "$T_IMPL" --reason="Implemented" > /dev/null
 
-# Now the test ticket should be ready (its only dep is done).
 assert_contains "test ticket is now ready" "$T_TEST" \
     "$CATS" peggy ticket ready --role=coder
 
-# Review still blocked (depends on test ticket too).
 assert_not_contains "review still not ready" "$T_REVIEW" \
     "$CATS" peggy ticket ready --role=reviewer
 
