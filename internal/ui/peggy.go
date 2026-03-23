@@ -115,7 +115,8 @@ type PeggyModel struct {
 	scrollOff  int // scroll offset for list
 
 	// Detail.
-	detail *peggy.TicketDetail
+	detail          *peggy.TicketDetail
+	detailScrollOff int
 
 	// Topic list.
 	topics        []peggy.Topic
@@ -263,6 +264,7 @@ func (m PeggyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case peggyDetailMsg:
 		m.detail = msg.detail
+		m.detailScrollOff = 0
 		return m, nil
 
 	case peggyTopicTicketsMsg:
@@ -285,6 +287,10 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "j", "down":
+		if m.focus == focusDetail {
+			m.detailScrollOff++
+			return m, nil
+		}
 		if m.mode == peggyModeTopics {
 			if m.topicSelected < len(m.topics)-1 {
 				m.topicSelected++
@@ -300,6 +306,12 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "k", "up":
+		if m.focus == focusDetail {
+			if m.detailScrollOff > 0 {
+				m.detailScrollOff--
+			}
+			return m, nil
+		}
 		if m.mode == peggyModeTopics {
 			if m.topicSelected > 0 {
 				m.topicSelected--
@@ -443,7 +455,7 @@ func (m PeggyModel) View() string {
 
 	if m.mode == peggyModeTopics {
 		leftPanel = m.renderTopicList()
-		rightPanel = m.renderTopicDetail()
+		rightPanel = m.scrollContent(m.renderTopicDetail())
 	} else {
 		leftPanel = m.renderTicketList()
 		rightPanel = m.renderDetailPanel()
@@ -538,11 +550,47 @@ func (m PeggyModel) renderTicketList() string {
 	return b.String()
 }
 
+func (m PeggyModel) scrollContent(content string) string {
+	lines := strings.Split(content, "\n")
+	visible := m.panelHeight()
+
+	scrollOff := m.detailScrollOff
+	maxScroll := len(lines) - visible
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if scrollOff > maxScroll {
+		scrollOff = maxScroll
+	}
+
+	start := scrollOff
+	end := start + visible
+	if end > len(lines) {
+		end = len(lines)
+	}
+
+	result := strings.Join(lines[start:end], "\n")
+
+	if len(lines) > visible {
+		result += "\n" + dimStyle.Render(fmt.Sprintf("  [%d/%d lines]", start+1, len(lines)))
+	}
+
+	return result
+}
+
+func (m PeggyModel) panelHeight() int {
+	h := m.height - 8
+	if h < 5 {
+		h = 5
+	}
+	return h
+}
+
 func (m PeggyModel) renderDetailPanel() string {
 	if m.detail == nil {
 		return dimStyle.Render("Select a ticket to view details.")
 	}
-	return m.renderInfoView()
+	return m.scrollContent(m.renderInfoView())
 }
 
 func (m PeggyModel) renderInfoView() string {
