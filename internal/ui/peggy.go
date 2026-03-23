@@ -57,13 +57,18 @@ var (
 	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Bold(true)
 
 	// Topic styles.
-	topicOpenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true) // green
-	topicClosedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))           // gray
-	topicNameStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true) // white bold
-	topicFieldStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("117"))           // light blue
+	topicOpenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true) // pink
+	topicClosedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))            // gray
+	topicNameStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)  // white bold
+	topicFieldStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("117"))            // light blue
 
 	// Title in list.
 	ticketTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+
+	// Peggy-specific selection/active/help styles (not shared with moe).
+	peggySelectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true) // pink
+	peggyActiveStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true) // pink
+	peggyHelpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 )
 
 // peggyMode tracks what view we're in.
@@ -519,7 +524,7 @@ func (m PeggyModel) renderTicketList() string {
 		t := m.tickets[i]
 		prefix := "  "
 		if i == m.selected {
-			prefix = selectedStyle.Render("| ")
+			prefix = peggySelectedStyle.Render("| ")
 		}
 
 		icon := statusIcon(t.Status)
@@ -644,7 +649,7 @@ func (m PeggyModel) renderTopicList() string {
 	for i, t := range m.topics {
 		prefix := "  "
 		if i == m.topicSelected {
-			prefix = selectedStyle.Render("| ")
+			prefix = peggySelectedStyle.Render("| ")
 		}
 
 		var icon, name string
@@ -707,7 +712,7 @@ func (m PeggyModel) renderStatusOverlay() string {
 	for i, s := range m.statusOpts {
 		prefix := "  "
 		if i == m.statusSelected {
-			prefix = selectedStyle.Render("| ")
+			prefix = peggySelectedStyle.Render("| ")
 		}
 		label := string(s)
 		if s == peggy.StatusClosed {
@@ -722,12 +727,12 @@ func (m PeggyModel) renderStatusOverlay() string {
 
 func (m PeggyModel) renderHelp() string {
 	if m.mode == peggyModeStatusChange {
-		return helpStyle.Render(" [enter] select  [esc] cancel  [j/k] navigate")
+		return peggyHelpStyle.Render(" [enter] select  [esc] cancel  [j/k] navigate")
 	}
 	if m.mode == peggyModeTopics {
-		return helpStyle.Render(" [t]ickets  [j/k] navigate  [q]uit")
+		return peggyHelpStyle.Render(" [t]ickets  [j/k] navigate  [q]uit")
 	}
-	return helpStyle.Render(" [f]ilter  [s]tatus  [t]opics  [tab] focus  [j/k] navigate  [q]uit")
+	return peggyHelpStyle.Render(" [f]ilter  [s]tatus  [t]opics  [tab] focus  [j/k] navigate  [q]uit")
 }
 
 // --- helpers ---
@@ -737,7 +742,7 @@ func statusIcon(s peggy.Status) string {
 	case peggy.StatusOpen:
 		return "o"
 	case peggy.StatusInProgress:
-		return activeStyle.Render("*")
+		return peggyActiveStyle.Render("*")
 	case peggy.StatusBlocked:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Render("!")
 	case peggy.StatusClosed:
@@ -795,11 +800,11 @@ func styledStatus(s peggy.Status) string {
 	case peggy.StatusOpen:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Render(string(s))
 	case peggy.StatusInProgress:
-		return activeStyle.Render(string(s))
+		return peggyActiveStyle.Render(string(s))
 	case peggy.StatusBlocked:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Render(string(s))
 	case peggy.StatusClosed:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("closed")
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render("closed")
 	default:
 		return string(s)
 	}
