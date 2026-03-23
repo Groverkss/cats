@@ -163,45 +163,129 @@ func extractDisplayText(line []byte) string {
 
 	switch msgType {
 	case "assistant":
-		// Assistant message — extract text from content blocks.
-		content, _ := msg["message"].(map[string]interface{})
-		if content == nil {
+		message, _ := msg["message"].(map[string]interface{})
+		if message == nil {
 			return ""
 		}
-		blocks, _ := content["content"].([]interface{})
-		var text string
+		blocks, _ := message["content"].([]interface{})
+		var parts []string
 		for _, b := range blocks {
 			block, _ := b.(map[string]interface{})
 			if block == nil {
 				continue
 			}
-			if block["type"] == "text" {
-				if t, ok := block["text"].(string); ok {
-					text += t
+			switch block["type"] {
+			case "text":
+				if t, ok := block["text"].(string); ok && t != "" {
+					parts = append(parts, t)
+				}
+			case "tool_use":
+				name, _ := block["name"].(string)
+				input, _ := block["input"].(map[string]interface{})
+				summary := formatToolUse(name, input)
+				parts = append(parts, summary)
+			}
+		}
+		if len(parts) == 0 {
+			return ""
+		}
+		return strings.Join(parts, "\n") + "\n"
+
+	case "user":
+		// Tool results — show what happened.
+		message, _ := msg["message"].(map[string]interface{})
+		if message == nil {
+			return ""
+		}
+		content, _ := message["content"].([]interface{})
+		for _, c := range content {
+			item, _ := c.(map[string]interface{})
+			if item == nil {
+				continue
+			}
+			if item["type"] == "tool_result" {
+				result, _ := item["content"].(string)
+				if result != "" {
+					// Truncate long results.
+					if len(result) > 200 {
+						result = result[:200] + "..."
+					}
+					return "  → " + result + "\n"
 				}
 			}
-			if block["type"] == "tool_use" {
-				name, _ := block["name"].(string)
-				text += fmt.Sprintf("\n[tool: %s]\n", name)
-			}
-		}
-		return text
-
-	case "result":
-		// Final result.
-		if result, ok := msg["result"].(string); ok {
-			return "\n" + result + "\n"
-		}
-		// Might be structured.
-		subtype, _ := msg["subtype"].(string)
-		if subtype == "success" {
-			return "\n[completed]\n"
 		}
 		return ""
+
+	case "result":
+		subtype, _ := msg["subtype"].(string)
+		result, _ := msg["result"].(string)
+		durationMs, _ := msg["duration_ms"].(float64)
+		cost, _ := msg["total_cost_usd"].(float64)
+
+		status := "✓ done"
+		if subtype != "success" {
+			status = "✗ " + subtype
+		}
+		summary := fmt.Sprintf("\n── %s", status)
+		if durationMs > 0 {
+			summary += fmt.Sprintf(" (%.1fs", durationMs/1000)
+			if cost > 0 {
+				summary += fmt.Sprintf(", $%.4f", cost)
+			}
+			summary += ")"
+		}
+		summary += "\n"
+		if result != "" {
+			summary += result + "\n"
+		}
+		return summary
 
 	default:
 		return ""
 	}
+}
+
+// formatToolUse returns a concise description of a tool call.
+func formatToolUse(name string, input map[string]interface{}) string {
+	switch name {
+	case "Write":
+		path, _ := input["file_path"].(string)
+		return fmt.Sprintf("📝 Write %s", shortPath(path))
+	case "Edit":
+		path, _ := input["file_path"].(string)
+		return fmt.Sprintf("✏️  Edit %s", shortPath(path))
+	case "Read":
+		path, _ := input["file_path"].(string)
+		return fmt.Sprintf("📖 Read %s", shortPath(path))
+	case "Bash":
+		cmd, _ := input["command"].(string)
+		if len(cmd) > 80 {
+			cmd = cmd[:80] + "..."
+		}
+		return fmt.Sprintf("$ %s", cmd)
+	case "Glob":
+		pattern, _ := input["pattern"].(string)
+		return fmt.Sprintf("🔍 Glob %s", pattern)
+	case "Grep":
+		pattern, _ := input["pattern"].(string)
+		return fmt.Sprintf("🔍 Grep %s", pattern)
+	case "Agent":
+		desc, _ := input["description"].(string)
+		return fmt.Sprintf("🤖 Agent: %s", desc)
+	case "TodoWrite":
+		return "📋 Update todos"
+	default:
+		return fmt.Sprintf("🔧 %s", name)
+	}
+}
+
+// shortPath returns the last 2 components of a path.
+func shortPath(path string) string {
+	parts := strings.Split(path, "/")
+	if len(parts) <= 2 {
+		return path
+	}
+	return ".../" + strings.Join(parts[len(parts)-2:], "/")
 }
 
 // Wait waits for the agent process to exit and returns the exit error.
