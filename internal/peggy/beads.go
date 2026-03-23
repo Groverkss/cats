@@ -218,6 +218,44 @@ func (s *BeadsStore) Close(ctx context.Context, id string, reason string) error 
 	return err
 }
 
+// --- Children ---
+
+func (s *BeadsStore) ListChildren(ctx context.Context, parentID string) ([]Ticket, error) {
+	// br dep list <parent> --direction=up --type=parent-child returns children.
+	type brDep struct {
+		IssueID string `json:"issue_id"`
+		Type    string `json:"type"`
+	}
+	var deps []brDep
+	if err := s.brJSON(ctx, &deps, "dep", "list", parentID, "--direction=up", "--type=parent-child"); err != nil {
+		return nil, err
+	}
+
+	var childIDs []string
+	for _, d := range deps {
+		if d.Type == "parent-child" {
+			childIDs = append(childIDs, d.IssueID)
+		}
+	}
+
+	if len(childIDs) == 0 {
+		return nil, nil
+	}
+
+	// Fetch full ticket details for each child.
+	var tickets []Ticket
+	for _, id := range childIDs {
+		detail, err := s.Get(ctx, id)
+		if err != nil {
+			continue
+		}
+		if detail.Type != "epic" {
+			tickets = append(tickets, detail.Ticket)
+		}
+	}
+	return tickets, nil
+}
+
 // --- Dependencies ---
 
 func (s *BeadsStore) AddDep(ctx context.Context, id string, dependsOn string) error {

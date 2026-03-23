@@ -80,6 +80,9 @@ type TicketStore interface {
 	UpdateStatus(ctx context.Context, id string, status Status, actor string) error
 	Close(ctx context.Context, id string, reason string) error
 
+	// Children
+	ListChildren(ctx context.Context, parentID string) ([]Ticket, error)
+
 	// Dependencies
 	AddDep(ctx context.Context, id string, dependsOn string) error
 	RemoveDep(ctx context.Context, id string, dependsOn string) error

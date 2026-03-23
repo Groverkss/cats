@@ -218,13 +218,7 @@ func (m PeggyModel) fetchTopicTicketsForSelected() tea.Cmd {
 func (m PeggyModel) fetchTopicTickets(epicID string) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		all, _ := m.store.List(ctx, peggy.Filter{})
-		var tickets []peggy.Ticket
-		for _, t := range all {
-			if t.ParentID == epicID && t.Type != "epic" {
-				tickets = append(tickets, t)
-			}
-		}
+		tickets, _ := m.store.ListChildren(ctx, epicID)
 		return peggyTopicTicketsMsg{tickets: tickets}
 	}
 }
