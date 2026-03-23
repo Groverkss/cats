@@ -101,7 +101,7 @@ func toBrTicket(t brTicket) Ticket {
 }
 
 func (s *BeadsStore) List(ctx context.Context, filter Filter) ([]Ticket, error) {
-	args := []string{"list"}
+	args := []string{"list", "--all"}
 	if filter.Status != nil {
 		args = append(args, "--status="+string(*filter.Status))
 	}

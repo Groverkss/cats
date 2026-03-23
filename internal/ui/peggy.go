@@ -427,9 +427,12 @@ func (m PeggyModel) View() string {
 	filterLabel := "all"
 	if m.filterIdx > 0 && m.filterIdx < len(filterCycle) {
 		f := filterCycle[m.filterIdx]
-		if f == filterReady {
+		switch f {
+		case filterReady:
 			filterLabel = "ready"
-		} else {
+		case peggy.StatusCompleted:
+			filterLabel = "closed"
+		default:
 			filterLabel = string(f)
 		}
 	}
@@ -706,7 +709,11 @@ func (m PeggyModel) renderStatusOverlay() string {
 		if i == m.statusSelected {
 			prefix = selectedStyle.Render("| ")
 		}
-		b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, statusIcon(s), s))
+		label := string(s)
+		if s == peggy.StatusCompleted {
+			label = "closed"
+		}
+		b.WriteString(fmt.Sprintf("%s%s %s\n", prefix, statusIcon(s), label))
 	}
 
 	b.WriteString(dimStyle.Render("\n[enter] select  [esc] cancel"))
@@ -794,9 +801,7 @@ func styledStatus(s peggy.Status) string {
 	case peggy.StatusBlocked:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("226")).Render(string(s))
 	case peggy.StatusCompleted:
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render(string(s))
-	case peggy.StatusCancelled:
-		return dimStyle.Render(string(s))
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Render("closed")
 	default:
 		return string(s)
 	}
