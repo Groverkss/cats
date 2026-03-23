@@ -1,6 +1,5 @@
 # Build output
-cmd/moe/moe
-/moe
+/cats
 
 # Worktrees managed by git
 .worktrees/

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -8,8 +9,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kunwar/cats/internal/agent"
+	"github.com/kunwar/cats/internal/peggy"
 	"github.com/kunwar/cats/internal/pool"
-	"github.com/kunwar/cats/internal/tickets"
 )
 
 var (
@@ -52,7 +53,6 @@ var (
 			Foreground(lipgloss.Color("240"))
 )
 
-// Modes for the TUI.
 type mode int
 
 const (
@@ -61,15 +61,7 @@ const (
 	modeStaleRecovery
 )
 
-// Which panel the output area shows.
-type outputView int
-
-const (
-	viewAgentOutput outputView = iota
-	viewTickets
-)
-
-type Model struct {
+type MoeModel struct {
 	pool      *pool.Pool
 	workspace string
 	selected  int
@@ -77,28 +69,17 @@ type Model struct {
 	width     int
 	height    int
 
-	// Output panel view.
-	outputView outputView
-
-	// Ticket data (updated on tick).
-	coderTickets    []tickets.Ticket
-	reviewerTickets []tickets.Ticket
-	progressTickets []tickets.Ticket
-
-	// Cached topic metadata (reloaded on tick).
-	topics []*tickets.TopicMeta
-
 	// Spawn role selection.
 	spawnRoles    []string
 	spawnSelected int
 
 	// Stale ticket recovery.
-	staleTickets  []tickets.Ticket
+	staleTickets  []peggy.Ticket
 	staleSelected int
 }
 
-func New(p *pool.Pool, workspace string) Model {
-	return Model{
+func NewMoe(p *pool.Pool, workspace string) MoeModel {
+	return MoeModel{
 		pool:       p,
 		workspace:  workspace,
 		spawnRoles: []string{"coder", "reviewer"},
@@ -107,29 +88,27 @@ func New(p *pool.Pool, workspace string) Model {
 
 // Messages.
 type tickMsg struct{}
-type refreshMsg struct{} // fast refresh for output panel
-type pollMsg struct {
-	coderTickets    []tickets.Ticket
-	reviewerTickets []tickets.Ticket
-	progressTickets []tickets.Ticket
-	topics          []*tickets.TopicMeta
-}
+type refreshMsg struct{}
 type assignMsg struct{}
 type staleMsg struct {
-	tickets []tickets.Ticket
+	tickets []peggy.Ticket
 }
 
-func (m Model) Init() tea.Cmd {
+func (m MoeModel) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(),
 		refreshCmd(),
-		checkStaleCmd,
+		checkStaleCmd(m.pool),
 	)
 }
 
-func checkStaleCmd() tea.Msg {
-	stale, _ := tickets.StaleTickets()
-	return staleMsg{tickets: stale}
+func checkStaleCmd(p *pool.Pool) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		status := peggy.StatusInProgress
+		stale, _ := p.Store().List(ctx, peggy.Filter{Status: &status})
+		return staleMsg{tickets: stale}
+	}
 }
 
 func tickCmd() tea.Cmd {
@@ -146,42 +125,23 @@ func refreshCmd() tea.Cmd {
 	)
 }
 
-func (m Model) pollTickets() tea.Msg {
-	coderTickets, _ := tickets.Ready("coder")
-	reviewerTickets, _ := tickets.Ready("reviewer")
-	progressTickets, _ := tickets.ListByStatus("in_progress")
-	topics, _ := tickets.LoadAllTopics(m.workspace)
-
-	return pollMsg{
-		coderTickets:    coderTickets,
-		reviewerTickets: reviewerTickets,
-		progressTickets: progressTickets,
-		topics:          topics,
-	}
-}
-
-func (m Model) tryAssign() tea.Msg {
+func (m MoeModel) tryAssign() tea.Msg {
 	agents := m.pool.Agents()
 	activeBranches := m.pool.ActiveBranches()
-
-	// Build role -> ready tickets map from cached poll data.
-	readyByRole := map[string][]tickets.Ticket{
-		"coder":    m.coderTickets,
-		"reviewer": m.reviewerTickets,
-	}
+	ctx := context.Background()
 
 	for _, a := range agents {
 		if a.State != agent.Idle {
 			continue
 		}
 
-		readyTickets := readyByRole[a.Role]
+		readyTickets, _ := m.pool.Store().Ready(ctx, a.Role)
 		if len(readyTickets) == 0 {
 			continue
 		}
 
 		for _, ticket := range readyTickets {
-			topic, err := tickets.ResolveTopicForTicket(m.topics, ticket)
+			topic, err := m.pool.Store().ResolveTopicForTicket(ctx, ticket.ID)
 			if err != nil {
 				continue
 			}
@@ -200,7 +160,7 @@ func (m Model) tryAssign() tea.Msg {
 	return assignMsg{}
 }
 
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m MoeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -211,23 +171,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case refreshMsg:
-		// Fast refresh — just re-renders the view (picks up new PTY output).
 		return m, refreshCmd()
 
 	case tickMsg:
-		// Poll first, then assign uses cached results on next tick.
+		// Reconcile dead agents, then assign.
+		m.pool.Reconcile()
 		return m, tea.Batch(
-			func() tea.Msg { return m.pollTickets() },
+			func() tea.Msg { return m.tryAssign() },
 			tickCmd(),
 		)
-
-	case pollMsg:
-		m.coderTickets = msg.coderTickets
-		m.reviewerTickets = msg.reviewerTickets
-		m.progressTickets = msg.progressTickets
-		m.topics = msg.topics
-		// Assign after poll data is updated.
-		return m, func() tea.Msg { return m.tryAssign() }
 
 	case assignMsg:
 		return m, nil
@@ -243,7 +195,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m MoeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeSpawnRole:
 		return m.handleSpawnKey(msg)
@@ -254,7 +206,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m MoeModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -275,14 +227,6 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "t":
-		if m.outputView == viewTickets {
-			m.outputView = viewAgentOutput
-		} else {
-			m.outputView = viewTickets
-		}
-		return m, nil
-
 	case "j", "down":
 		agents := m.pool.Agents()
 		if m.selected < len(agents)-1 {
@@ -299,7 +243,7 @@ func (m Model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleSpawnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m MoeModel) handleSpawnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "escape":
 		m.mode = modeNormal
@@ -327,10 +271,10 @@ func (m Model) handleSpawnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleStaleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m MoeModel) handleStaleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	ctx := context.Background()
 	switch msg.String() {
 	case "escape", "s":
-		// Skip — leave all as-is.
 		m.mode = modeNormal
 		m.staleTickets = nil
 		return m, nil
@@ -348,10 +292,9 @@ func (m Model) handleStaleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "r":
-		// Reset selected ticket to open.
 		if m.staleSelected < len(m.staleTickets) {
 			t := m.staleTickets[m.staleSelected]
-			tickets.UpdateStatus(t.ID, "open", "moe")
+			m.pool.Store().UpdateStatus(ctx, t.ID, peggy.StatusOpen, "moe")
 			m.staleTickets = append(m.staleTickets[:m.staleSelected], m.staleTickets[m.staleSelected+1:]...)
 			if m.staleSelected >= len(m.staleTickets) && m.staleSelected > 0 {
 				m.staleSelected--
@@ -363,9 +306,8 @@ func (m Model) handleStaleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "a":
-		// Reset all to open.
 		for _, t := range m.staleTickets {
-			tickets.UpdateStatus(t.ID, "open", "moe")
+			m.pool.Store().UpdateStatus(ctx, t.ID, peggy.StatusOpen, "moe")
 		}
 		m.staleTickets = nil
 		m.mode = modeNormal
@@ -374,14 +316,13 @@ func (m Model) handleStaleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) View() string {
+func (m MoeModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
 	}
 
-	title := titleStyle.Render(" 🐈‍⬛ moe ")
+	title := titleStyle.Render(" moe ")
 
-	// Stale recovery mode shows a full-screen overlay.
 	if m.mode == modeStaleRecovery {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			title,
@@ -392,21 +333,15 @@ func (m Model) View() string {
 
 	agents := m.pool.Agents()
 	sidebar := m.renderSidebar(agents)
-	var output string
-	if m.outputView == viewTickets {
-		output = m.renderTicketList()
-	} else {
-		output = m.renderOutput(agents)
-	}
+	output := m.renderOutput(agents)
 	statusBar := m.renderStatusBar()
 	help := m.renderHelp()
 
-	// Layout.
-	outputWidth := m.width - 32 - 2 // sidebar width + gaps
+	outputWidth := m.width - 32 - 2
 	if outputWidth < 20 {
 		outputWidth = 20
 	}
-	outputHeight := m.height - 6 // title + status + help + borders
+	outputHeight := m.height - 6
 	if outputHeight < 5 {
 		outputHeight = 5
 	}
@@ -424,18 +359,18 @@ func (m Model) View() string {
 	)
 }
 
-func (m Model) renderStaleRecovery() string {
+func (m MoeModel) renderStaleRecovery() string {
 	var b strings.Builder
 	b.WriteString("\n  Stale tickets found (in_progress with no active agent):\n\n")
 
 	for i, t := range m.staleTickets {
 		prefix := "  "
 		if i == m.staleSelected {
-			prefix = selectedStyle.Render("▸ ")
+			prefix = selectedStyle.Render("| ")
 		}
 		assignee := "(unassigned)"
-		if t.Assignee != nil {
-			assignee = *t.Assignee
+		if t.Assignee != "" {
+			assignee = t.Assignee
 		}
 		b.WriteString(fmt.Sprintf("%s%s  %s  [%s]\n", prefix, t.ID, t.Title, assignee))
 	}
@@ -443,56 +378,11 @@ func (m Model) renderStaleRecovery() string {
 	return b.String()
 }
 
-func (m Model) renderTicketList() string {
-	var b strings.Builder
-
-	priorityStr := func(p int) string { return fmt.Sprintf("P%d", p) }
-
-	renderTicket := func(t tickets.Ticket) {
-		assignee := ""
-		if t.Assignee != nil {
-			assignee = *t.Assignee
-		}
-		b.WriteString(fmt.Sprintf("  %-14s %-4s %-10s %s\n", t.ID, priorityStr(t.Priority), assignee, t.Title))
-	}
-
-	b.WriteString("Tickets\n")
-	b.WriteString(fmt.Sprintf("  %-14s %-4s %-10s %s\n", "ID", "PRI", "ASSIGNEE", "TITLE"))
-	b.WriteString("  " + strings.Repeat("─", 60) + "\n")
-
-	if len(m.coderTickets) > 0 {
-		b.WriteString(activeStyle.Render(fmt.Sprintf("\n  Ready — coder (%d)\n", len(m.coderTickets))))
-		for _, t := range m.coderTickets {
-			renderTicket(t)
-		}
-	}
-
-	if len(m.reviewerTickets) > 0 {
-		b.WriteString(activeStyle.Render(fmt.Sprintf("\n  Ready — reviewer (%d)\n", len(m.reviewerTickets))))
-		for _, t := range m.reviewerTickets {
-			renderTicket(t)
-		}
-	}
-
-	if len(m.progressTickets) > 0 {
-		b.WriteString(failedStyle.Render(fmt.Sprintf("\n  In Progress (%d)\n", len(m.progressTickets))))
-		for _, t := range m.progressTickets {
-			renderTicket(t)
-		}
-	}
-
-	if len(m.coderTickets) == 0 && len(m.reviewerTickets) == 0 && len(m.progressTickets) == 0 {
-		b.WriteString(idleStyle.Render("\n  No tickets found.\n"))
-	}
-
-	return b.String()
-}
-
-func (m Model) renderSidebar(agents []*agent.Agent) string {
+func (m MoeModel) renderSidebar(agents []*agent.Agent) string {
 	var b strings.Builder
 
 	b.WriteString("Workers\n")
-	b.WriteString("───────\n")
+	b.WriteString("-------\n")
 
 	if len(agents) == 0 {
 		b.WriteString(idleStyle.Render("(none)"))
@@ -502,17 +392,17 @@ func (m Model) renderSidebar(agents []*agent.Agent) string {
 	for i, a := range agents {
 		prefix := "  "
 		if i == m.selected {
-			prefix = "▸ "
+			prefix = "| "
 		}
 
 		var stateStr string
 		switch a.State {
 		case agent.Working:
-			stateStr = activeStyle.Render("● " + a.ID)
+			stateStr = activeStyle.Render("* " + a.ID)
 		case agent.Failed:
-			stateStr = failedStyle.Render("✗ " + a.ID)
+			stateStr = failedStyle.Render("x " + a.ID)
 		default:
-			stateStr = idleStyle.Render("○ " + a.ID)
+			stateStr = idleStyle.Render("o " + a.ID)
 		}
 
 		if i == m.selected {
@@ -529,19 +419,13 @@ func (m Model) renderSidebar(agents []*agent.Agent) string {
 		}
 	}
 
-	b.WriteString("\n───────\n")
-	b.WriteString("Tickets\n")
-	b.WriteString(fmt.Sprintf("  coder:    %d ready\n", len(m.coderTickets)))
-	b.WriteString(fmt.Sprintf("  reviewer: %d ready\n", len(m.reviewerTickets)))
-	b.WriteString(fmt.Sprintf("  in progress: %d\n", len(m.progressTickets)))
-
 	// Spawn overlay.
 	if m.mode == modeSpawnRole {
-		b.WriteString("\n───────\n")
+		b.WriteString("\n-------\n")
 		b.WriteString("Spawn role:\n")
 		for i, role := range m.spawnRoles {
 			if i == m.spawnSelected {
-				b.WriteString(selectedStyle.Render("▸ " + role))
+				b.WriteString(selectedStyle.Render("| " + role))
 			} else {
 				b.WriteString("  " + role)
 			}
@@ -552,7 +436,7 @@ func (m Model) renderSidebar(agents []*agent.Agent) string {
 	return b.String()
 }
 
-func (m Model) renderOutput(agents []*agent.Agent) string {
+func (m MoeModel) renderOutput(agents []*agent.Agent) string {
 	if len(agents) == 0 {
 		return "No agents running.\n\nPress [l] to launch a new agent."
 	}
@@ -575,7 +459,6 @@ func (m Model) renderOutput(agents []*agent.Agent) string {
 		}
 	}
 
-	// Trim to fit screen.
 	lines := strings.Split(output, "\n")
 	maxLines := m.height - 10
 	if maxLines < 5 {
@@ -585,10 +468,10 @@ func (m Model) renderOutput(agents []*agent.Agent) string {
 		lines = lines[len(lines)-maxLines:]
 	}
 
-	return header + "\n" + strings.Repeat("─", 40) + "\n" + strings.Join(lines, "\n")
+	return header + "\n" + strings.Repeat("-", 40) + "\n" + strings.Join(lines, "\n")
 }
 
-func (m Model) renderStatusBar() string {
+func (m MoeModel) renderStatusBar() string {
 	agents := m.pool.Agents()
 	working := 0
 	idle := 0
@@ -601,17 +484,13 @@ func (m Model) renderStatusBar() string {
 		}
 	}
 	return statusBarStyle.Render(
-		fmt.Sprintf(" agents: %d (%d working, %d idle)  |  tickets: %d ready, %d in progress",
-			len(agents), working, idle,
-			len(m.coderTickets)+len(m.reviewerTickets), len(m.progressTickets)))
+		fmt.Sprintf(" agents: %d (%d working, %d idle)",
+			len(agents), working, idle))
 }
 
-func (m Model) renderHelp() string {
+func (m MoeModel) renderHelp() string {
 	if m.mode == modeSpawnRole {
 		return helpStyle.Render(" [enter] select  [esc] cancel")
 	}
-	if m.outputView == viewTickets {
-		return helpStyle.Render(" [t]oggle output  [l]aunch  [k]ill  [j/↓] next  [↑] prev  [q]uit")
-	}
-	return helpStyle.Render(" [t]ickets  [l]aunch  [k]ill  [j/↓] next  [↑] prev  [q]uit")
+	return helpStyle.Render(" [l]aunch  [k]ill  [j/k] navigate  [q]uit")
 }

@@ -4,7 +4,7 @@ TICKET: {{TICKET_ID}}
 
 ## Workflow
 
-1. Run `br show {{TICKET_ID}}` to read the review request
+1. Run `cats peggy ticket show {{TICKET_ID}}` to read the review request
 2. Read CLAUDE.md for project conventions
 3. Review the diff: `git diff main...HEAD`
 4. Check for:

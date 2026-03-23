@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -54,8 +55,8 @@ type Agent struct {
 
 func New(id, role string) *Agent {
 	return &Agent{
-		ID:   id,
-		Role: role,
+		ID:    id,
+		Role:  role,
 		State: Idle,
 	}
 }
@@ -319,6 +320,53 @@ func (a *Agent) Kill() {
 	if a.cmd != nil && a.cmd.Process != nil {
 		a.cmd.Process.Kill()
 	}
+}
+
+// StartCmd launches an agent with a pre-built command (from sandbox.Command).
+func (a *Agent) StartCmd(cmd *exec.Cmd, ticketID, topic, branch, logDir string) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.TicketID = ticketID
+	a.Topic = topic
+	a.Branch = branch
+	a.State = Working
+	a.output = nil
+	a.cmd = cmd
+
+	stdout, err := a.cmd.StdoutPipe()
+	if err != nil {
+		a.State = Failed
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	a.cmd.Stderr = a.cmd.Stdout
+
+	logPath := fmt.Sprintf("%s/%s-%s.log", logDir, a.ID, time.Now().Format("2006-01-02T15-04-05"))
+	a.logFile, err = os.Create(logPath)
+	if err != nil {
+		a.State = Failed
+		return fmt.Errorf("failed to create log file: %w", err)
+	}
+
+	if err := a.cmd.Start(); err != nil {
+		a.logFile.Close()
+		a.State = Failed
+		return fmt.Errorf("failed to start agent: %w", err)
+	}
+
+	go a.readStreamJSON(stdout)
+	return nil
+}
+
+// IsAlive returns true if the agent's process is still running.
+func (a *Agent) IsAlive() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cmd == nil || a.cmd.Process == nil {
+		return false
+	}
+	// Signal 0 checks if process exists without killing it.
+	return a.cmd.Process.Signal(syscall.Signal(0)) == nil
 }
 
 // Reset returns the agent to idle state.

@@ -2,15 +2,26 @@
 
 ## What This Is
 
-cats is a multi-agent workspace coordination system. Work is tracked via
-beads-rust (`br`) tickets stored in `.beads/`. Agents are stateless —
-everything they need is in the ticket description and this file.
+cats is a multi-agent workspace coordination system. A single `cats` binary
+provides all functionality through subcommands.
+
+## Commands
+
+```
+cats kitten              Initialize a new workspace
+cats peggy               Ticket + topic management TUI
+cats peggy ticket ...    Ticket CLI (list, show, create, ready, close, update)
+cats peggy topic ...     Topic CLI (create, list, status, close)
+cats moe                 Agent pool manager TUI
+cats plan                Launch the planner agent (interactive claude session)
+cats box                 Sandboxed shell in a worktree
+```
 
 ## Agent Roles
 
-- **Planner (peggy):** Creates topics, designs solutions, writes tickets.
-  Does NOT write code.
-- **Coder:** Implements tickets. Works on topic branches in `.worktrees/`.
+- **Planner (cats plan):** Creates topics, designs solutions, writes tickets.
+  Does NOT write code. Uses `cats peggy` CLI to manage tickets and topics.
+- **Coder:** Implements tickets. Works on topic branches in worktrees.
 - **Reviewer:** Reviews code on topic branches. Does NOT modify code.
 
 ## Conventions
@@ -21,14 +32,12 @@ everything they need is in the ticket description and this file.
 - One ticket per agent session — finish it or escalate
 - If blocked, update the ticket and reassign to planner
 
-## Beads Commands
+## Ticket Commands (for agents)
 
 ```bash
-br ready                    # Find actionable work
-br show <id>                # Full ticket details
-br update <id> --status=in_progress
-br close <id> --reason="Done"
-br sync --flush-only        # Export before session end
+cats peggy ticket show <id>                    # Full ticket details
+cats peggy ticket update <id> --status=in_progress
+cats peggy ticket close <id> --reason="Done"
 ```
 
 ## Before Ending a Session
@@ -36,6 +45,5 @@ br sync --flush-only        # Export before session end
 ```bash
 git add <files>
 git commit -m "ticket-id: description"
-br close <ticket-id> --reason="..."
-br sync --flush-only
+cats peggy ticket close <ticket-id> --reason="..."
 ```
