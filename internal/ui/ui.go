@@ -84,13 +84,24 @@ const (
 	modeStaleRecovery
 )
 
+type moeFocus int
+
+const (
+	moeFocusSidebar moeFocus = iota
+	moeFocusOutput
+)
+
 type MoeModel struct {
 	pool      *pool.Pool
 	workspace string
 	selected  int
 	mode      mode
+	focus     moeFocus
 	width     int
 	height    int
+
+	// Output scrolling.
+	outputScrollOff int
 
 	// Spawn role selection.
 	spawnRoles    []string
@@ -234,32 +245,54 @@ func (m MoeModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
+	case "tab":
+		if m.focus == moeFocusSidebar {
+			m.focus = moeFocusOutput
+		} else {
+			m.focus = moeFocusSidebar
+		}
+		return m, nil
+
 	case "l":
 		m.mode = modeSpawnRole
 		m.spawnSelected = 0
 		return m, nil
 
-	case "k":
-		agents := m.pool.Agents()
-		if len(agents) > 0 && m.selected < len(agents) {
-			a := agents[m.selected]
-			m.pool.Remove(a.ID)
-			if m.selected >= len(m.pool.Agents()) && m.selected > 0 {
-				m.selected--
+	case "x":
+		if m.focus == moeFocusSidebar {
+			agents := m.pool.Agents()
+			if len(agents) > 0 && m.selected < len(agents) {
+				a := agents[m.selected]
+				m.pool.Remove(a.ID)
+				if m.selected >= len(m.pool.Agents()) && m.selected > 0 {
+					m.selected--
+				}
 			}
 		}
 		return m, nil
 
 	case "j", "down":
-		agents := m.pool.Agents()
-		if m.selected < len(agents)-1 {
-			m.selected++
+		if m.focus == moeFocusOutput {
+			m.outputScrollOff++
+		} else {
+			agents := m.pool.Agents()
+			if m.selected < len(agents)-1 {
+				m.selected++
+				m.outputScrollOff = 0
+			}
 		}
 		return m, nil
 
-	case "up":
-		if m.selected > 0 {
-			m.selected--
+	case "k", "up":
+		if m.focus == moeFocusOutput {
+			if m.outputScrollOff > 0 {
+				m.outputScrollOff--
+			}
+		} else {
+			if m.selected > 0 {
+				m.selected--
+				m.outputScrollOff = 0
+			}
 		}
 		return m, nil
 	}
@@ -369,8 +402,16 @@ func (m MoeModel) View() string {
 		outputHeight = 5
 	}
 
-	sidebarRendered := sidebarStyle.Height(outputHeight).Render(sidebar)
-	outputRendered := outputStyle.Width(outputWidth).Height(outputHeight).Render(output)
+	sidebarBorder := lipgloss.Color("35")
+	outputBorder := lipgloss.Color("35")
+	if m.focus == moeFocusSidebar {
+		sidebarBorder = lipgloss.Color("46")
+	} else {
+		outputBorder = lipgloss.Color("46")
+	}
+
+	sidebarRendered := sidebarStyle.Copy().BorderForeground(sidebarBorder).Height(outputHeight).Render(sidebar)
+	outputRendered := outputStyle.Copy().BorderForeground(outputBorder).Width(outputWidth).Height(outputHeight).Render(output)
 
 	main := lipgloss.JoinHorizontal(lipgloss.Top, sidebarRendered, outputRendered)
 
@@ -487,11 +528,30 @@ func (m MoeModel) renderOutput(agents []*agent.Agent) string {
 	if maxLines < 5 {
 		maxLines = 5
 	}
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
+
+	// Apply scroll offset.
+	maxScroll := len(lines) - maxLines
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.outputScrollOff > maxScroll {
+		m.outputScrollOff = maxScroll
 	}
 
-	return header + "\n" + moeSeparatorStyle.Render(strings.Repeat("-", 40)) + "\n" + strings.Join(lines, "\n")
+	start := m.outputScrollOff
+	end := start + maxLines
+	if end > len(lines) {
+		end = len(lines)
+	}
+	visible := lines[start:end]
+
+	result := header + "\n" + moeSeparatorStyle.Render(strings.Repeat("-", 40)) + "\n" + strings.Join(visible, "\n")
+
+	if len(lines) > maxLines {
+		result += "\n" + idleStyle.Render(fmt.Sprintf("  [%d/%d lines]", start+1, len(lines)))
+	}
+
+	return result
 }
 
 func (m MoeModel) renderStatusBar() string {
@@ -517,5 +577,5 @@ func (m MoeModel) renderHelp() string {
 	if m.mode == modeSpawnRole {
 		return helpStyle.Render(" [enter] select  [esc] cancel")
 	}
-	return helpStyle.Render(" [l]aunch  [k]ill  [j/k] navigate  [q]uit")
+	return helpStyle.Render(" [l]aunch  [x] kill  [tab] focus  [j/k] navigate  [q]uit")
 }
