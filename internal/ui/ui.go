@@ -59,7 +59,6 @@ const (
 	modeNormal mode = iota
 	modeSpawnRole
 	modeStaleRecovery
-	modeTickets
 )
 
 // Which panel the output area shows.
@@ -82,12 +81,12 @@ type Model struct {
 	outputView outputView
 
 	// Ticket data (updated on tick).
-	readyCoder      int
-	readyReviewer   int
-	inProgress      int
 	coderTickets    []tickets.Ticket
 	reviewerTickets []tickets.Ticket
 	progressTickets []tickets.Ticket
+
+	// Cached topic metadata (reloaded on tick).
+	topics []*tickets.TopicMeta
 
 	// Spawn role selection.
 	spawnRoles    []string
@@ -110,12 +109,10 @@ func New(p *pool.Pool, workspace string) Model {
 type tickMsg struct{}
 type refreshMsg struct{} // fast refresh for output panel
 type pollMsg struct {
-	readyCoder      int
-	readyReviewer   int
-	inProgress      int
 	coderTickets    []tickets.Ticket
 	reviewerTickets []tickets.Ticket
 	progressTickets []tickets.Ticket
+	topics          []*tickets.TopicMeta
 }
 type assignMsg struct{}
 type staleMsg struct {
@@ -153,14 +150,13 @@ func (m Model) pollTickets() tea.Msg {
 	coderTickets, _ := tickets.Ready("coder")
 	reviewerTickets, _ := tickets.Ready("reviewer")
 	progressTickets, _ := tickets.ListByStatus("in_progress")
+	topics, _ := tickets.LoadAllTopics(m.workspace)
 
 	return pollMsg{
-		readyCoder:      len(coderTickets),
-		readyReviewer:   len(reviewerTickets),
-		inProgress:      len(progressTickets),
 		coderTickets:    coderTickets,
 		reviewerTickets: reviewerTickets,
 		progressTickets: progressTickets,
+		topics:          topics,
 	}
 }
 
@@ -168,23 +164,28 @@ func (m Model) tryAssign() tea.Msg {
 	agents := m.pool.Agents()
 	activeBranches := m.pool.ActiveBranches()
 
+	// Build role -> ready tickets map from cached poll data.
+	readyByRole := map[string][]tickets.Ticket{
+		"coder":    m.coderTickets,
+		"reviewer": m.reviewerTickets,
+	}
+
 	for _, a := range agents {
 		if a.State != agent.Idle {
 			continue
 		}
 
-		readyTickets, err := tickets.Ready(a.Role)
-		if err != nil || len(readyTickets) == 0 {
+		readyTickets := readyByRole[a.Role]
+		if len(readyTickets) == 0 {
 			continue
 		}
 
 		for _, ticket := range readyTickets {
-			topic, err := tickets.ResolveTopicForTicket(m.workspace, ticket)
+			topic, err := tickets.ResolveTopicForTicket(m.topics, ticket)
 			if err != nil {
 				continue
 			}
 
-			// One agent per branch.
 			if activeBranches[topic.Branch] {
 				continue
 			}
@@ -214,20 +215,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, refreshCmd()
 
 	case tickMsg:
+		// Poll first, then assign uses cached results on next tick.
 		return m, tea.Batch(
 			func() tea.Msg { return m.pollTickets() },
-			func() tea.Msg { return m.tryAssign() },
 			tickCmd(),
 		)
 
 	case pollMsg:
-		m.readyCoder = msg.readyCoder
-		m.readyReviewer = msg.readyReviewer
-		m.inProgress = msg.inProgress
 		m.coderTickets = msg.coderTickets
 		m.reviewerTickets = msg.reviewerTickets
 		m.progressTickets = msg.progressTickets
-		return m, nil
+		m.topics = msg.topics
+		// Assign after poll data is updated.
+		return m, func() tea.Msg { return m.tryAssign() }
 
 	case assignMsg:
 		return m, nil
@@ -446,22 +446,7 @@ func (m Model) renderStaleRecovery() string {
 func (m Model) renderTicketList() string {
 	var b strings.Builder
 
-	priorityStr := func(p int) string {
-		switch p {
-		case 0:
-			return "P0"
-		case 1:
-			return "P1"
-		case 2:
-			return "P2"
-		case 3:
-			return "P3"
-		case 4:
-			return "P4"
-		default:
-			return fmt.Sprintf("P%d", p)
-		}
-	}
+	priorityStr := func(p int) string { return fmt.Sprintf("P%d", p) }
 
 	renderTicket := func(t tickets.Ticket) {
 		assignee := ""
@@ -546,9 +531,9 @@ func (m Model) renderSidebar(agents []*agent.Agent) string {
 
 	b.WriteString("\n───────\n")
 	b.WriteString("Tickets\n")
-	b.WriteString(fmt.Sprintf("  coder:    %d ready\n", m.readyCoder))
-	b.WriteString(fmt.Sprintf("  reviewer: %d ready\n", m.readyReviewer))
-	b.WriteString(fmt.Sprintf("  in progress: %d\n", m.inProgress))
+	b.WriteString(fmt.Sprintf("  coder:    %d ready\n", len(m.coderTickets)))
+	b.WriteString(fmt.Sprintf("  reviewer: %d ready\n", len(m.reviewerTickets)))
+	b.WriteString(fmt.Sprintf("  in progress: %d\n", len(m.progressTickets)))
 
 	// Spawn overlay.
 	if m.mode == modeSpawnRole {
@@ -618,7 +603,7 @@ func (m Model) renderStatusBar() string {
 	return statusBarStyle.Render(
 		fmt.Sprintf(" agents: %d (%d working, %d idle)  |  tickets: %d ready, %d in progress",
 			len(agents), working, idle,
-			m.readyCoder+m.readyReviewer, m.inProgress))
+			len(m.coderTickets)+len(m.reviewerTickets), len(m.progressTickets)))
 }
 
 func (m Model) renderHelp() string {

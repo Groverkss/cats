@@ -44,8 +44,7 @@ type Agent struct {
 	Branch   string
 
 	// Process management.
-	cmd    *exec.Cmd
-	cancel func()
+	cmd *exec.Cmd
 
 	// Output capture.
 	mu      sync.Mutex
@@ -138,8 +137,9 @@ func (a *Agent) readStreamJSON(r interface{ Read([]byte) (int, error) }) {
 			continue
 		}
 
+		cleaned := ansiRegex.ReplaceAllString(text, "")
 		a.mu.Lock()
-		a.output = append(a.output, []byte(text)...)
+		a.output = append(a.output, []byte(cleaned)...)
 		// Keep last 64KB.
 		if len(a.output) > 65536 {
 			a.output = a.output[len(a.output)-65536:]
@@ -305,13 +305,12 @@ func (a *Agent) Wait() error {
 	return err
 }
 
-// Output returns the current captured output with ANSI escapes stripped.
+// Output returns the current captured output.
 func (a *Agent) Output() []byte {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	cleaned := ansiRegex.ReplaceAll(a.output, nil)
-	out := make([]byte, len(cleaned))
-	copy(out, cleaned)
+	out := make([]byte, len(a.output))
+	copy(out, a.output)
 	return out
 }
 

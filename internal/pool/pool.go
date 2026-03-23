@@ -62,20 +62,6 @@ func (p *Pool) Agents() []*agent.Agent {
 	return out
 }
 
-// IdleAgents returns agents in idle state for a given role.
-func (p *Pool) IdleAgents(role string) []*agent.Agent {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	var idle []*agent.Agent
-	for _, a := range p.agents {
-		if a.Role == role && a.State == agent.Idle {
-			idle = append(idle, a)
-		}
-	}
-	return idle
-}
-
 // ActiveBranches returns the set of branches currently being worked on.
 func (p *Pool) ActiveBranches() map[string]bool {
 	p.mu.Lock()
