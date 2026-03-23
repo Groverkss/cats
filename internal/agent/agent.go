@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/creack/pty"
 )
+
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[[?][0-9;]*[a-zA-Z]|\x1b\[<[a-zA-Z]`)
 
 type State int
 
@@ -163,12 +166,13 @@ func (a *Agent) Wait() error {
 	return err
 }
 
-// Output returns the current captured output.
+// Output returns the current captured output with ANSI escapes stripped.
 func (a *Agent) Output() []byte {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	out := make([]byte, len(a.output))
-	copy(out, a.output)
+	cleaned := ansiRegex.ReplaceAll(a.output, nil)
+	out := make([]byte, len(cleaned))
+	copy(out, cleaned)
 	return out
 }
 
