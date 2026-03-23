@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/creack/pty"
 )
 
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b\[[?][0-9;]*[a-zA-Z]|\x1b\[<[a-zA-Z]`)
@@ -45,7 +45,6 @@ type Agent struct {
 
 	// Process management.
 	cmd    *exec.Cmd
-	ptmx   *os.File
 	cancel func()
 
 	// Output capture.
@@ -80,17 +79,17 @@ func (a *Agent) Start(workspace, ticketID, topic, branch, worktree, promptTempla
 	prompt = strings.ReplaceAll(prompt, "{{BRANCH}}", branch)
 
 	// Build the claude command.
+	// Use --output-format=stream-json for real-time streaming via pipe.
 	args := []string{
 		sandboxPath,
 		"--workdir", worktree,
-	}
-	args = append(args,
 		"claude",
 		"--dangerously-skip-permissions",
 		"-p",
+		"--output-format", "stream-json",
 		"--append-system-prompt", prompt,
 		fmt.Sprintf("Read CLAUDE.md, then run 'br show %s' and work on the ticket.", ticketID),
-	)
+	}
 
 	a.cmd = exec.Command(args[0], args[1:]...)
 	a.cmd.Env = append(os.Environ(),
@@ -98,50 +97,110 @@ func (a *Agent) Start(workspace, ticketID, topic, branch, worktree, promptTempla
 		fmt.Sprintf("CATS_WORKSPACE=%s", workspace),
 	)
 
-	// Use a PTY so claude sees a terminal and streams output unbuffered.
-	// We don't connect this PTY to bubbletea — we just read from it.
-	ptmx, err := pty.Start(a.cmd)
+	stdout, err := a.cmd.StdoutPipe()
 	if err != nil {
 		a.State = Failed
-		return fmt.Errorf("failed to start agent: %w", err)
+		return fmt.Errorf("stdout pipe: %w", err)
 	}
-	a.ptmx = ptmx
+
+	a.cmd.Stderr = a.cmd.Stdout
 
 	// Open log file.
 	logPath := fmt.Sprintf("%s/%s-%s.log", logDir, a.ID, time.Now().Format("2006-01-02T15-04-05"))
 	a.logFile, err = os.Create(logPath)
 	if err != nil {
-		a.ptmx.Close()
-		a.cmd.Process.Kill()
 		a.State = Failed
 		return fmt.Errorf("failed to create log file: %w", err)
 	}
 
-	// Read PTY output in background.
-	go a.readOutput()
+	if err := a.cmd.Start(); err != nil {
+		a.logFile.Close()
+		a.State = Failed
+		return fmt.Errorf("failed to start agent: %w", err)
+	}
+
+	// Read streaming JSON output in background.
+	go a.readStreamJSON(stdout)
 
 	return nil
 }
 
-func (a *Agent) readOutput() {
-	buf := make([]byte, 4096)
-	for {
-		n, err := a.ptmx.Read(buf)
-		if n > 0 {
-			a.mu.Lock()
-			a.output = append(a.output, buf[:n]...)
-			// Keep last 64KB of output.
-			if len(a.output) > 65536 {
-				a.output = a.output[len(a.output)-65536:]
-			}
-			if a.logFile != nil {
-				a.logFile.Write(buf[:n])
-			}
-			a.mu.Unlock()
+func (a *Agent) readStreamJSON(r interface{ Read([]byte) (int, error) }) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 256*1024), 256*1024) // 256KB line buffer
+
+	for scanner.Scan() {
+		line := scanner.Bytes()
+
+		// Parse stream-json to extract display text.
+		text := extractDisplayText(line)
+		if text == "" {
+			continue
 		}
-		if err != nil {
-			return
+
+		a.mu.Lock()
+		a.output = append(a.output, []byte(text)...)
+		// Keep last 64KB.
+		if len(a.output) > 65536 {
+			a.output = a.output[len(a.output)-65536:]
 		}
+		if a.logFile != nil {
+			a.logFile.Write(line)
+			a.logFile.Write([]byte("\n"))
+		}
+		a.mu.Unlock()
+	}
+}
+
+// extractDisplayText pulls human-readable text from claude's stream-json output.
+func extractDisplayText(line []byte) string {
+	var msg map[string]interface{}
+	if err := json.Unmarshal(line, &msg); err != nil {
+		return ""
+	}
+
+	msgType, _ := msg["type"].(string)
+
+	switch msgType {
+	case "assistant":
+		// Assistant message — extract text from content blocks.
+		content, _ := msg["message"].(map[string]interface{})
+		if content == nil {
+			return ""
+		}
+		blocks, _ := content["content"].([]interface{})
+		var text string
+		for _, b := range blocks {
+			block, _ := b.(map[string]interface{})
+			if block == nil {
+				continue
+			}
+			if block["type"] == "text" {
+				if t, ok := block["text"].(string); ok {
+					text += t
+				}
+			}
+			if block["type"] == "tool_use" {
+				name, _ := block["name"].(string)
+				text += fmt.Sprintf("\n[tool: %s]\n", name)
+			}
+		}
+		return text
+
+	case "result":
+		// Final result.
+		if result, ok := msg["result"].(string); ok {
+			return "\n" + result + "\n"
+		}
+		// Might be structured.
+		subtype, _ := msg["subtype"].(string)
+		if subtype == "success" {
+			return "\n[completed]\n"
+		}
+		return ""
+
+	default:
+		return ""
 	}
 }
 
@@ -153,10 +212,6 @@ func (a *Agent) Wait() error {
 	err := a.cmd.Wait()
 
 	a.mu.Lock()
-	if a.ptmx != nil {
-		a.ptmx.Close()
-		a.ptmx = nil
-	}
 	if a.logFile != nil {
 		a.logFile.Close()
 		a.logFile = nil
@@ -193,5 +248,4 @@ func (a *Agent) Reset() {
 	a.Branch = ""
 	a.output = nil
 	a.cmd = nil
-	a.ptmx = nil
 }
