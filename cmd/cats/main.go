@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -91,6 +92,11 @@ func newStore(workspace string) *peggy.BeadsStore {
 // --- cats kitten ---
 
 func cmdKitten(args []string) {
+	if len(args) > 0 && args[0] == "update" {
+		cmdKittenUpdate()
+		return
+	}
+
 	dir, err := os.Getwd()
 	if err != nil {
 		fatal(err)
@@ -99,6 +105,7 @@ func cmdKitten(args []string) {
 	// Check if already initialized.
 	if _, err := os.Stat(filepath.Join(dir, "cats.toml")); err == nil {
 		fmt.Fprintf(os.Stderr, "Error: workspace already initialized (cats.toml exists)\n")
+		fmt.Fprintf(os.Stderr, "Use 'cats kitten update' to update the cats binary.\n")
 		os.Exit(1)
 	}
 
@@ -136,8 +143,13 @@ extra_rw = []
 		}
 	}
 
-	// Initialize beads.
+	// Copy cats binary into workspace.
+	if err := copySelfTo(filepath.Join(dir, "cats")); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not copy cats binary: %v\n", err)
+	}
+
 	fmt.Println("Initialized cats workspace in", dir)
+	fmt.Println("  cats        cats binary (for agents)")
 	fmt.Println("  .beads/     ticket database")
 	fmt.Println("  .topics/    topic metadata")
 	fmt.Println("  .worktrees/ git worktrees")
@@ -145,6 +157,70 @@ extra_rw = []
 	fmt.Println("  prompts/    agent prompt templates")
 	fmt.Println("")
 	fmt.Println("Next: cats peggy topic create <name> --repo <path> \"description\"")
+}
+
+func cmdKittenUpdate() {
+	ws := requireWorkspace()
+	dest := filepath.Join(ws, "cats")
+	if err := copySelfTo(dest); err != nil {
+		fatal(err)
+	}
+	fmt.Printf("Updated cats binary in %s\n", ws)
+}
+
+// copySelfTo copies the currently running binary to dest.
+// Uses write-to-temp + rename to avoid "text file busy" when overwriting self.
+func copySelfTo(dest string) error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("cannot find own executable: %w", err)
+	}
+	self, err = filepath.EvalSymlinks(self)
+	if err != nil {
+		return fmt.Errorf("cannot resolve executable path: %w", err)
+	}
+
+	// Refuse to overwrite self.
+	destAbs, _ := filepath.Abs(dest)
+	if self == destAbs {
+		return fmt.Errorf("source and destination are the same file")
+	}
+
+	src, err := os.Open(self)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	info, err := src.Stat()
+	if err != nil {
+		return err
+	}
+
+	// Write to temp file in same directory, then atomic rename.
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".cats-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := io.Copy(tmp, src); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	tmp.Close()
+
+	if err := os.Chmod(tmpPath, info.Mode()); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+
+	if err := os.Rename(tmpPath, dest); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 // --- cats peggy ---

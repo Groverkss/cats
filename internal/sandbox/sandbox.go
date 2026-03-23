@@ -121,8 +121,9 @@ func buildArgs(cfg Config) []string {
 	args = append(args, "--setenv", "XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	args = append(args, "--setenv", "XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 
-	// PATH.
+	// PATH — workspace root first so agents find the cats binary.
 	pathParts := []string{
+		cfg.Workspace,
 		filepath.Join(cfg.Workspace, ".venv", "bin"),
 		filepath.Join(home, ".local", "bin"),
 	}
