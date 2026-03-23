@@ -14,43 +14,66 @@ import (
 )
 
 var (
+	// Moe theme: green/neon on black. Green eyes.
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("57")).
+			Foreground(lipgloss.Color("0")).
+			Background(lipgloss.Color("46")).
 			Padding(0, 1)
 
 	sidebarStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
+			BorderForeground(lipgloss.Color("35")).
 			Padding(0, 1).
 			Width(30)
 
 	outputStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("240")).
+			BorderForeground(lipgloss.Color("35")).
 			Padding(0, 1)
 
 	statusBarStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+			Foreground(lipgloss.Color("245"))
 
 	activeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82")).
+			Foreground(lipgloss.Color("46")).
 			Bold(true)
 
 	idleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+			Foreground(lipgloss.Color("245"))
 
 	failedStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")).
 			Bold(true)
 
 	selectedStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("212")).
+			Foreground(lipgloss.Color("15")).
 			Bold(true)
 
 	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+			Foreground(lipgloss.Color("245"))
+
+	// Output panel styles.
+	moeHeaderStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("46")).
+			Bold(true)
+
+	moeTicketIDStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("48"))
+
+	moeTopicStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("35"))
+
+	moeSeparatorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("238"))
+
+	moeIdleTextStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("240")).
+				Italic(true)
+
+	moeLabelStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245")).
+			Bold(true)
 )
 
 type mode int
@@ -381,12 +404,12 @@ func (m MoeModel) renderStaleRecovery() string {
 func (m MoeModel) renderSidebar(agents []*agent.Agent) string {
 	var b strings.Builder
 
-	b.WriteString("Workers\n")
-	b.WriteString("-------\n")
+	b.WriteString(moeHeaderStyle.Render("Workers") + "\n")
+	b.WriteString(moeSeparatorStyle.Render("-------") + "\n")
 
 	if len(agents) == 0 {
-		b.WriteString(idleStyle.Render("(none)"))
-		b.WriteString("\n\nPress [l] to launch")
+		b.WriteString(moeIdleTextStyle.Render("(none)"))
+		b.WriteString("\n\n" + idleStyle.Render("Press [l] to launch"))
 	}
 
 	for i, a := range agents {
@@ -415,14 +438,14 @@ func (m MoeModel) renderSidebar(agents []*agent.Agent) string {
 		b.WriteString("\n")
 
 		if a.State == agent.Working {
-			b.WriteString(fmt.Sprintf("    %s\n", a.TicketID))
+			b.WriteString(fmt.Sprintf("    %s\n", moeTicketIDStyle.Render(a.TicketID)))
 		}
 	}
 
 	// Spawn overlay.
 	if m.mode == modeSpawnRole {
-		b.WriteString("\n-------\n")
-		b.WriteString("Spawn role:\n")
+		b.WriteString("\n" + moeSeparatorStyle.Render("-------") + "\n")
+		b.WriteString(moeHeaderStyle.Render("Spawn role:") + "\n")
 		for i, role := range m.spawnRoles {
 			if i == m.spawnSelected {
 				b.WriteString(selectedStyle.Render("| " + role))
@@ -438,24 +461,24 @@ func (m MoeModel) renderSidebar(agents []*agent.Agent) string {
 
 func (m MoeModel) renderOutput(agents []*agent.Agent) string {
 	if len(agents) == 0 {
-		return "No agents running.\n\nPress [l] to launch a new agent."
+		return moeIdleTextStyle.Render("No agents running.") + "\n\n" + idleStyle.Render("Press [l] to launch a new agent.")
 	}
 	if m.selected >= len(agents) {
 		return ""
 	}
 
 	a := agents[m.selected]
-	header := fmt.Sprintf("Output: %s", a.ID)
+	header := moeHeaderStyle.Render("Output: " + a.ID)
 	if a.State == agent.Working {
-		header += fmt.Sprintf("  [%s] %s", a.TicketID, a.Topic)
+		header += "  " + moeTicketIDStyle.Render("["+a.TicketID+"]") + " " + moeTopicStyle.Render(a.Topic)
 	}
 
 	output := string(a.Output())
 	if output == "" {
 		if a.State == agent.Idle {
-			output = "(idle — waiting for ticket)"
+			output = moeIdleTextStyle.Render("(idle — waiting for ticket)")
 		} else {
-			output = "(starting...)"
+			output = moeIdleTextStyle.Render("(starting...)")
 		}
 	}
 
@@ -468,7 +491,7 @@ func (m MoeModel) renderOutput(agents []*agent.Agent) string {
 		lines = lines[len(lines)-maxLines:]
 	}
 
-	return header + "\n" + strings.Repeat("-", 40) + "\n" + strings.Join(lines, "\n")
+	return header + "\n" + moeSeparatorStyle.Render(strings.Repeat("-", 40)) + "\n" + strings.Join(lines, "\n")
 }
 
 func (m MoeModel) renderStatusBar() string {
@@ -483,9 +506,11 @@ func (m MoeModel) renderStatusBar() string {
 			idle++
 		}
 	}
+	workingStr := activeStyle.Render(fmt.Sprintf("%d working", working))
+	idleStr := idleStyle.Render(fmt.Sprintf("%d idle", idle))
 	return statusBarStyle.Render(
-		fmt.Sprintf(" agents: %d (%d working, %d idle)",
-			len(agents), working, idle))
+		fmt.Sprintf(" agents: %d (%s, %s)",
+			len(agents), workingStr, idleStr))
 }
 
 func (m MoeModel) renderHelp() string {
