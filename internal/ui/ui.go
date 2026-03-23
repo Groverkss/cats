@@ -245,7 +245,7 @@ func (m MoeModel) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m MoeModel) handleSpawnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "escape":
+	case "esc":
 		m.mode = modeNormal
 		return m, nil
 
@@ -274,7 +274,7 @@ func (m MoeModel) handleSpawnKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m MoeModel) handleStaleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	ctx := context.Background()
 	switch msg.String() {
-	case "escape", "s":
+	case "esc", "s":
 		m.mode = modeNormal
 		m.staleTickets = nil
 		return m, nil

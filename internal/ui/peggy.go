@@ -327,7 +327,7 @@ func (m PeggyModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m PeggyModel) handleStatusKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "escape":
+	case "esc":
 		m.mode = peggyModeTickets
 		return m, nil
 
